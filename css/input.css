@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { font-family: Inter, system-ui, Segoe UI, Arial, sans-serif; }
+}
+
+/* Outside @layer so Tailwind never purges them (some are only set from JS). */
+.tnum { font-variant-numeric: tabular-nums; }
+[data-acc] > summary { list-style: none; cursor: pointer; }
+[data-acc] > summary::-webkit-details-marker { display: none; }
+[data-acc][open] .chev { transform: rotate(180deg); }
+.scrollbox { scrollbar-width: thin; }
+
+.step {
+  flex: none; display: inline-flex; height: 1.6rem; width: 1.6rem; align-items: center; justify-content: center;
+  border-radius: 9999px; background: hsl(212 64% 30%); color: #fff; font-size: .8rem; font-weight: 600;
+}
+.alert-ok, .alert-warn {
+  display: block; border-radius: .6rem; padding: .75rem 1rem; font-weight: 600; font-size: 14px;
+}
+.alert-ok   { border: 1px solid hsl(142 45% 80%); background: hsl(140 55% 96%); color: hsl(142 55% 25%); }
+.alert-warn { border: 1px solid hsl(0 70% 88%);   background: hsl(0 75% 97%);   color: hsl(0 65% 38%); }
+.alert-warn .sub, .alert-ok .sub { display: block; font-weight: 400; margin-top: .25rem; font-size: 13px; opacity: .95; }

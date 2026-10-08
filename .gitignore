@@ -1,0 +1,3 @@
+node_modules/
+# Real farm reports and their snapshots — never publish (this repo is public).
+raw/

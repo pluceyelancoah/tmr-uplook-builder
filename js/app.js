@@ -1,0 +1,153 @@
+/* Page wiring: reads the dropped file, renders the three steps, builds the UpLook download. */
+(function () {
+"use strict";
+const { HEADERS, UserError, processReport, uploadRows, outputName } = window.TMRCore;
+
+let lastRows = null, lastName = "uplook_ingredient_usage", lastFile = null;
+
+const $ = id => document.getElementById(id);
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = (n,d)=> Number(n).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
+
+function show(data, info){
+  $("result").classList.remove("hidden");
+  $("error").classList.add("hidden");
+  $("s-period").textContent = data.dateRange || "—";
+  $("s-days").textContent = data.days || "not detected";
+  $("s-count").textContent = data.after.length;
+  $("success").innerHTML =
+    `✓ ${esc(info.source)} read. Work through the three steps below, then download from Step 3.`;
+
+  const src = $("source");
+  const fracNote = `Bovaer share of the Bovaer Premix (BOVAR): <b>${fmt(info.bovaerFrac*100,2)}%</b> of dry matter`
+    + (info.bovaerFracFromReport ? " — read from this report's BOVAR batches." : " — from Advanced settings.");
+  src.innerHTML = (info.included
+    ? `<p><b>Milking-cow rations included</b> (they contain PREMIX or 2PRMIX): ${info.included.map(esc).join(", ")}.</p>`
+      + (info.excluded.length ? `<p class="mt-1"><b>Not included:</b> ${info.excluded.map(esc).join(", ")}.</p>` : "")
+    : "") + `<p class="mt-1">${fracNote}</p>`;
+
+  const miss = $("missing");
+  if (data.missing.length){
+    const l = data.missing.map(m=>`${esc(m.code)} (${m.dm.toFixed(1)} t)`).join(", ");
+    miss.className = "alert-warn"; miss.classList.remove("hidden");
+    miss.innerHTML = `⚠ This report is missing a premix recipe: ${l}.`
+      + `<span class="sub">That feed can't be broken into ingredients and is NOT in the final list. `
+      + `Re-export the report with the premix batches included before uploading to UpLook.</span>`;
+  } else miss.classList.add("hidden");
+
+  // step 1 — premix cards
+  const pm = $("premixes"); pm.innerHTML="";
+  if(!data.premixes.length) pm.innerHTML = '<p class="text-sm text-muted-foreground">No premixes were fed to the herd this period.</p>';
+  data.premixes.forEach(p=>{
+    const card = document.createElement("div");
+    card.className = "rounded-lg border border-border bg-muted/20 p-4";
+    const rows = p.rows.map(r=>`<tr class="border-t border-border/70">
+        <td class="py-1.5 pr-3 font-medium text-brand tnum">${esc(r.code)}</td>
+        <td class="py-1.5 pr-3 text-muted-foreground">${esc(r.desc)}</td>
+        <td class="py-1.5 pr-3 text-right tnum">${fmt(r.pct,1)}%</td>
+        <td class="py-1.5 text-right tnum">${fmt(r.fedDM,3)}</td></tr>`).join("");
+    card.innerHTML = `<div class="flex items-baseline justify-between">
+        <h4 class="font-semibold text-brand">${esc(p.code)}</h4>
+        <span class="text-[13px] text-muted-foreground">fed ${fmt(p.fedDM,2)} t DM · batch ${fmt(p.batchDM,2)} t · ×${p.factor.toFixed(2)}</span></div>
+      <table class="w-full text-sm mt-2"><thead><tr class="text-muted-foreground text-xs uppercase tracking-wide">
+        <th class="text-left font-medium pb-1">Ingredient</th><th class="text-left font-medium pb-1">Report name</th>
+        <th class="text-right font-medium pb-1">% of mix</th><th class="text-right font-medium pb-1">Tons fed (DM)</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+    pm.appendChild(card);
+  });
+
+  renderTable("before", data.before, data.beforeTotal);
+  renderTable("after",  data.after,  data.afterTotal);
+
+  const rn = $("reportnote");
+  if(data.reportTotal > data.beforeTotal*1.001){
+    rn.classList.remove("hidden");
+    rn.innerHTML = `<b>Why this is lower than the report's printed total:</b> the report shows `
+      + `${fmt(data.reportTotal,1)} t, but that also counts the premix <i>mixing</i> batches `
+      + `(${fmt(data.mixingDM,1)} t — the same corn, canola, etc. logged again when the premixes were made). `
+      + `Counting each feed once gives ${fmt(data.beforeTotal,1)} t — what the cows actually ate.`;
+  } else rn.classList.add("hidden");
+
+  const gap = data.herdDM ? Math.abs(data.afterTotal-data.herdDM)/data.herdDM*100 : 0;
+  const recon = $("recon");
+  if(!data.herdDM){ recon.className="alert-warn"; recon.innerHTML="⚠ No whole-herd totals were found in this file to check against."; }
+  else if(gap < 0.3 && !data.missing.length){ recon.className="alert-ok";
+    recon.innerHTML = `✓ Totals match. Step 2 = ${fmt(data.beforeTotal,1)} t · Step 3 = ${fmt(data.afterTotal,1)} t · `
+      + `whole-herd = ${fmt(data.herdDM,1)} t. The premixes were opened up without changing the total.`; }
+  else { recon.className="alert-warn";
+    recon.innerHTML = `⚠ Please double-check. Step 3 = ${fmt(data.afterTotal,1)} t but the whole-herd total is ${fmt(data.herdDM,1)} t.`
+      + (data.missing.length ? `<span class="sub">This is from the missing premix recipe above.</span>` : ``); }
+
+  lastRows = uploadRows(data);
+}
+
+function renderTable(id, rows, total){
+  const t = $(id);
+  t.innerHTML = `<thead class="sticky top-0"><tr class="bg-muted text-muted-foreground text-xs uppercase tracking-wide">
+      <th class="text-left font-medium px-3 py-2">Ingredient</th>
+      <th class="text-left font-medium px-3 py-2">Report name</th>
+      <th class="text-right font-medium px-3 py-2">Tons / Month (DM)</th></tr></thead>`;
+  const tb = document.createElement("tbody");
+  rows.forEach((r,i)=>{ const tr=document.createElement("tr");
+    tr.className = "border-t border-border " + (i%2? "bg-muted/20":"");
+    tr.innerHTML = `<td class="px-3 py-1.5 font-medium text-brand tnum">${esc(r.code)}</td>`
+      + `<td class="px-3 py-1.5 text-muted-foreground">${esc(r.desc)}</td>`
+      + `<td class="px-3 py-1.5 text-right tnum">${fmt(r.dm,3)}</td>`;
+    tb.appendChild(tr); });
+  t.appendChild(tb);
+  const tf = document.createElement("tfoot");
+  tf.innerHTML = `<tr class="border-t-2 border-brand/30 bg-muted/50 font-semibold">
+      <td class="px-3 py-2">TOTAL</td><td></td><td class="px-3 py-2 text-right tnum">${fmt(total,3)}</td></tr>`;
+  t.appendChild(tf);
+}
+
+function fail(msg, detail){
+  $("error").classList.remove("hidden");
+  $("result").classList.add("hidden");
+  $("error-msg").textContent = msg;
+  $("error-detail").textContent = detail ? ("If this keeps happening, send this to Elanco: " + detail) : "";
+}
+
+function handleFile(file){
+  lastFile = file;
+  const isCsv = file.name.toLowerCase().endsWith(".csv");
+  const frac = (parseFloat($("frac").value)||7.76)/100;
+  const rd = new FileReader();
+  rd.onload = e => {
+    try{
+      const { data, info } = processReport(file.name, e.target.result, frac, window.XLSX);
+      lastName = outputName(file.name);
+      show(data, info);
+    }catch(err){
+      if (err instanceof UserError) fail(err.message);
+      else fail("Something went wrong reading that file. Please re-export it and try again.", err.message);
+    }
+  };
+  if(isCsv) rd.readAsText(file); else rd.readAsArrayBuffer(file);
+}
+
+const drop = $("drop"), fileInput = $("file");
+drop.onclick = ()=> fileInput.click();
+drop.addEventListener("keydown", e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); fileInput.click(); }});
+fileInput.onchange = e => { if(e.target.files[0]) handleFile(e.target.files[0]); };
+["dragover","dragenter"].forEach(ev=> drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.add("border-brand","bg-brand/5");}));
+["dragleave","drop"].forEach(ev=> drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.remove("border-brand","bg-brand/5");}));
+drop.addEventListener("drop", e=>{ if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+$("frac").onchange = ()=> { if(lastFile) handleFile(lastFile); };
+
+$("dl-xlsx").onclick = ()=>{
+  if(!lastRows) return;
+  const ws = XLSX.utils.aoa_to_sheet([HEADERS, ...lastRows]);
+  ws["!cols"] = [{wch:24},{wch:15},{wch:15},{wch:14},{wch:17},{wch:13}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+  XLSX.writeFile(wb, lastName+".xlsx");
+};
+$("dl-csv").onclick = ()=>{
+  if(!lastRows) return;
+  const cell = v => /[",\n]/.test(v) ? '"'+String(v).replace(/"/g,'""')+'"' : v;
+  const csv = [HEADERS, ...lastRows].map(r=>r.map(cell).join(",")).join("\r\n");
+  const blob = new Blob([csv], {type:"text/csv"});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = lastName+".csv"; a.click();
+};
+})();
