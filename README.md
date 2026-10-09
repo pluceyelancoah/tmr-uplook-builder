@@ -1,9 +1,12 @@
 # TMR Tracker → UpLook Sheet Builder
 
 Static page that turns a monthly TMR Tracker export into the ingredient sheet UpLook accepts.
-Premixes (PREMIX, 2PRMIX) are broken out into their raw ingredients, and the Bovaer Premix
-(BOVAR) is split into Bovaer and ground corn. Everything runs in the browser, so no feed data
-leaves the page.
+Premixes (PREMIX, 2PRMIX) are broken out into their raw ingredients, and then the Bovaer
+Premix (BOVAR) is broken out into Bovaer and ground corn. Each one uses its own batch recipe
+from the same report; there are no built-in defaults. If a premix's batches are missing, the
+page warns instead of guessing. The page also shows the Bovaer dose (mg 3-NOP per kg dry
+matter, target 60), calculated from Bovaer as fed × 10% ÷ dry matter eaten. Everything runs
+in the browser, so no feed data leaves the page.
 
 Live: https://pluceyelancoah.github.io/tmr-uplook-builder/ (GitHub Pages, `main` branch, repo root).
 **Pushing to `main` deploys straight away.**
@@ -11,8 +14,8 @@ Live: https://pluceyelancoah.github.io/tmr-uplook-builder/ (GitHub Pages, `main`
 ## Supported reports
 | Report | Format | Notes |
 |---|---|---|
-| **Load report** | CSV | Preferred. Rations that contain PREMIX/2PRMIX count as milking cows. The Bovaer share of BOVAR is read from that month's BOVAR batches. |
-| Ingredient report (older) | Excel or derived CSV | Bovaer share comes from Advanced settings (default 7.76% DM). |
+| **Load report** | CSV | Preferred. Rations that contain PREMIX/2PRMIX count as milking cows. A month with no BOVAR batch made in it can't be broken out. |
+| Ingredient report (older) | Excel or derived CSV | Only works if the export includes the BOVAR batch section. Outside that section, the code `Bovaer` means the BOVAR blend. |
 | Ingredient/Premix Usage | CSV | Rejected: it double counts the premix mixing loads and doesn't show what's in each premix. |
 
 ## Layout

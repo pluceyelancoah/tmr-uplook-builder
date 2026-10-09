@@ -5,7 +5,6 @@ const XLSX = require("xlsx");
 const C = require("../js/core.js");
 
 const RAW = path.join(__dirname, "..", "raw");
-const DEFAULT_FRAC = 0.0776;
 const r3 = n => Math.round(n * 1000) / 1000;
 
 const sampleFiles = () => fs.existsSync(RAW)
@@ -16,8 +15,8 @@ function summarise(file){
   const full = path.join(RAW, file);
   const content = /\.csv$/i.test(file) ? fs.readFileSync(full, "utf8") : new Uint8Array(fs.readFileSync(full));
   try {
-    const { data, info } = C.processReport(file, content, DEFAULT_FRAC, XLSX);
-    return { info: { ...info, bovaerFrac: r3(info.bovaerFrac * 100) },
+    const { data, info } = C.processReport(file, content, XLSX);
+    return { info, dose: data.dose && r3(data.dose.mgPerKg),
       dateRange: data.dateRange, days: data.days, herdDM: r3(data.herdDM),
       beforeTotal: r3(data.beforeTotal), afterTotal: r3(data.afterTotal),
       missing: data.missing.map(m => m.code), upload: C.uploadRows(data) };

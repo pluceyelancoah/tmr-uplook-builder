@@ -6,13 +6,13 @@ const C = require("../js/core.js");
 const close = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, `${msg}: ${a} != ${b}`);
 const byCode = data => Object.fromEntries(data.after.map(r => [r.code, r.dm]));
 
-// Weights in lb (DM). BOVAR = 10% Bovaer; PREMIX = 40% BOVAR; HIGH COW eats 500 lb PREMIX of a 1,000 lb batch.
+// Weights in lb. BOVAR = 9% Bovaer DM (Bovaer itself 90% DM); PREMIX = 40% BOVAR; HIGH COW eats 500 lb PREMIX of a 1,000 lb batch.
 const LOAD_REPORT = [
   "# Farm: TEST DAIRY",
   "# Generated: 2026-10-06 13:39:20",
   "BatchId,Recipe,BaseBatchId,Ingredient,Pen,Load/Delivery date and time,Actual call weight,Dry call weight,Actual weight,Dry weight,Error amount,Error %,Planned cost,Cost,Cost error,Operator",
-  "b1,Bovaer Premix (BOVAR),,GROUND CORN (GRDCRN),,2026-09-01 08:00:00,0,0,1000,900,0,0,0,0,0,A",
-  "b1,Bovaer Premix (BOVAR),,Bovaer (Bovaer),,2026-09-01 08:05:00,0,0,100,100,0,0,0,0,0,A",
+  "b1,Bovaer Premix (BOVAR),,GROUND CORN (GRDCRN),,2026-09-01 08:00:00,0,0,1000,910,0,0,0,0,0,A",
+  "b1,Bovaer Premix (BOVAR),,Bovaer (Bovaer),,2026-09-01 08:05:00,0,0,100,90,0,0,0,0,0,A",
   "b1,Bovaer Premix (BOVAR),,,Bovaer Premix (BOVAR),2026-09-01 08:10:00,0,,1100,,0,0,0,0,0,A",
   "p1,Premix MILK COWS (PREMIX),,CANOLA (CANOLA),,2026-09-02 08:00:00,0,0,700,600,0,0,0,0,0,A",
   "p1,Premix MILK COWS (PREMIX),,Bovaer Premix (BOVAR),,2026-09-02 08:05:00,0,0,450,400,0,0,0,0,0,A",
@@ -25,13 +25,12 @@ const LOAD_REPORT = [
   "d1,DRY COW (DRYCOW),,,20 - Dry Cows (20),2026-09-30 08:10:00,0,,1100,,0,0,0,0,0,A",
 ].join("\r\n");
 
-test("Load report: premixes and BOVAR broken out, totals reconcile", () => {
-  const { data, info } = C.processReport("Load_report.csv", LOAD_REPORT, 0.0776, XLSX);
+test("Load report: premixes and BOVAR broken out, totals reconcile, dose on as-fed Bovaer", () => {
+  const { data, info } = C.processReport("Load_report.csv", LOAD_REPORT, XLSX);
   assert.equal(info.source, "Load report");
   assert.deepEqual(info.included, ["HIGH COW"]);
   assert.deepEqual(info.excluded, ["DRY COW"]);
-  assert.equal(info.bovaerFracFromReport, true);
-  close(info.bovaerFrac, 0.1, "Bovaer share of BOVAR");
+  assert.deepEqual(data.premixes.map(p => p.code), ["PREMIX", "BOVAR"]);
 
   assert.equal(data.dateRange, "From 9/1/2026 until 9/30/2026");
   assert.equal(data.days, 30);
@@ -42,51 +41,72 @@ test("Load report: premixes and BOVAR broken out, totals reconcile", () => {
   assert.deepEqual(Object.keys(t).sort(), ["Bovaer", "CANOLA", "CORSL", "GRDCRN"]);
   close(t.CORSL, 0.75, "CORSL");
   close(t.CANOLA, 0.15, "CANOLA");
-  close(t.Bovaer, 0.01, "Bovaer");
-  close(t.GRDCRN, 0.09, "GRDCRN");
+  close(t.Bovaer, 0.009, "Bovaer DM");
+  close(t.GRDCRN, 0.091, "GRDCRN");
+
+  // 0.009 t DM / 90% DM = 0.01 t as fed; x 10% 3-NOP / 1 t DM eaten = 1,000 mg/kg
+  close(data.dose.bovaerAsFed, 0.01, "Bovaer as fed");
+  close(data.dose.mgPerKg, 1000, "dose");
 });
 
-test("Load report: falls back to the setting when there are no BOVAR batches", () => {
+test("Load report: no BOVAR batches -> BOVAR flagged as missing, no dose", () => {
   const noBovar = LOAD_REPORT.split("\r\n").filter(l => !l.startsWith("b1,")).join("\r\n");
-  const { data, info } = C.processReport("Load_report.csv", noBovar, 0.05, XLSX);
-  assert.equal(info.bovaerFracFromReport, false);
-  close(byCode(data).Bovaer, 0.1 * 0.05, "Bovaer");
+  const { data } = C.processReport("Load_report.csv", noBovar, XLSX);
+  assert.deepEqual(data.missing.map(m => m.code), ["BOVAR"]);
+  assert.equal(byCode(data).Bovaer, undefined);
+  assert.equal(data.dose, null);
 });
 
 test("Load report: missing premix batches are flagged, not silently dropped", () => {
   const noPremix = LOAD_REPORT.split("\r\n").filter(l => !l.startsWith("p1,")).join("\r\n");
-  const { data } = C.processReport("Load_report.csv", noPremix, 0.0776, XLSX);
+  const { data } = C.processReport("Load_report.csv", noPremix, XLSX);
   assert.equal(data.missing.length, 1);
   assert.equal(data.missing[0].code, "PREMIX");
+  assert.equal(data.dose, null);
 });
 
 test("Ingredient/Premix Usage summary is rejected with a clear message", () => {
   const summary = "# Farm: X\nIngredient,Call weight,Loaded weight,Unit,Call weight,Loaded weight,Weight,%,Planned,Actual,Error\nCANOLA (CANOLA),1,1,Ton,1,1,0,0,0,0,0\n";
-  assert.throws(() => C.processReport("Ingredient_Premix_Usage.csv", summary, 0.0776, XLSX),
+  assert.throws(() => C.processReport("Ingredient_Premix_Usage.csv", summary, XLSX),
     e => e instanceof C.UserError && /Load report/.test(e.message));
 });
 
-test("Legacy derived CSV still works", () => {
+test("Legacy derived CSV: BOVAR broken out from its own batch section", () => {
   const csv = [
-    "Pen,AvgHeads,RowType,DisplayName,Description,DryWt_Ton,Units,DateRange",
-    "1,100,Ingredient,PREMIX,Premix,1.0,Ton,From 4/1/2026 until 4/30/2026",
-    "1,100,Ingredient,CORSL,Corn silage,3.0,Ton,From 4/1/2026 until 4/30/2026",
-    "1,100,SubTotal,,,4.0,Ton,From 4/1/2026 until 4/30/2026",
-    "PREMIX,,Ingredient,CANOLA,Canola,1.5,Ton,From 4/1/2026 until 4/30/2026",
-    "PREMIX,,Ingredient,BOVAR,Bovaer Premix,0.5,Ton,From 4/1/2026 until 4/30/2026",
+    "Pen,AvgHeads,RowType,DisplayName,Description,ActualWt_Ton,DryWt_Ton,Units,DateRange",
+    "1,100,Ingredient,PREMIX,Premix,1.1,1.0,Ton,From 4/1/2026 until 4/30/2026",
+    "1,100,Ingredient,CORSL,Corn silage,9.0,3.0,Ton,From 4/1/2026 until 4/30/2026",
+    "1,100,SubTotal,,,10.1,4.0,Ton,From 4/1/2026 until 4/30/2026",
+    "PREMIX,,Ingredient,CANOLA,Canola,1.7,1.5,Ton,From 4/1/2026 until 4/30/2026",
+    "PREMIX,,Ingredient,BOVAR,Bovaer Premix,0.6,0.5,Ton,From 4/1/2026 until 4/30/2026",
+    "BOVAR,,Ingredient,GRDCRN,Ground corn,1.1,0.9,Ton,From 4/1/2026 until 4/30/2026",
+    "BOVAR,,Ingredient,Bovaer,Bovaer,0.1,0.1,Ton,From 4/1/2026 until 4/30/2026",
   ].join("\n");
-  const { data, info } = C.processReport("April.csv", csv, 0.0776, XLSX);
+  const { data, info } = C.processReport("April.csv", csv, XLSX);
   assert.equal(info.source, "Ingredient report");
   assert.equal(data.days, 30);
   const t = byCode(data);
   close(t.CANOLA, 0.75, "CANOLA");
-  close(t.Bovaer, 0.25 * 0.0776, "Bovaer");
-  close(t.GRDCRN, 0.25 * (1 - 0.0776), "GRDCRN");
+  close(t.Bovaer, 0.025, "Bovaer");
+  close(t.GRDCRN, 0.225, "GRDCRN");
   close(data.afterTotal, 4, "after total");
+  close(data.dose.mgPerKg, 0.025 * 0.1 / 4 * 1e6, "dose");
+});
+
+test("Legacy report without a BOVAR section: BOVAR flagged, never guessed", () => {
+  const csv = [
+    "Pen,AvgHeads,RowType,DisplayName,Description,ActualWt_Ton,DryWt_Ton,Units",
+    "1,100,Ingredient,BOVAR,Bovaer Premix,0.6,0.5,Ton",
+    "1,100,Ingredient,CORSL,Corn silage,9.0,3.0,Ton",
+    "1,100,SubTotal,,,9.6,3.5,Ton",
+  ].join("\n");
+  const { data } = C.processReport("April.csv", csv, XLSX);
+  assert.deepEqual(data.missing.map(m => m.code), ["BOVAR"]);
+  assert.equal(data.dose, null);
 });
 
 test("Unsupported file types are rejected", () => {
-  assert.throws(() => C.processReport("notes.pdf", "", 0.0776, XLSX), C.UserError);
+  assert.throws(() => C.processReport("notes.pdf", "", XLSX), C.UserError);
 });
 
 test("outputName strips the extension regardless of case", () => {

@@ -3,7 +3,7 @@
 "use strict";
 const { HEADERS, UserError, processReport, uploadRows, outputName } = window.TMRCore;
 
-let lastRows = null, lastName = "uplook_ingredient_usage", lastFile = null;
+let lastRows = null, lastName = "uplook_ingredient_usage";
 
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -19,20 +19,31 @@ function show(data, info){
     `✓ ${esc(info.source)} read. Work through the three steps below, then download from Step 3.`;
 
   const src = $("source");
-  const fracNote = `Bovaer share of the Bovaer Premix (BOVAR): <b>${fmt(info.bovaerFrac*100,2)}%</b> of dry matter`
-    + (info.bovaerFracFromReport ? " — read from this report's BOVAR batches." : " — from Advanced settings.");
+  const d = data.dose;
   src.innerHTML = (info.included
     ? `<p><b>Milking-cow rations included</b> (they contain PREMIX or 2PRMIX): ${info.included.map(esc).join(", ")}.</p>`
       + (info.excluded.length ? `<p class="mt-1"><b>Not included:</b> ${info.excluded.map(esc).join(", ")}.</p>` : "")
-    : "") + `<p class="mt-1">${fracNote}</p>`;
+    : "")
+    + (d ? `<p class="mt-1"><b>Dose:</b> ${fmt(d.bovaerAsFed*2000,1)} lb Bovaer as fed (${fmt(d.bovaerDmPct,0)}% DM in the report) × 10% 3-NOP `
+      + `÷ ${fmt(data.herdDM*2000,0)} lb dry matter eaten.</p>` : "");
+
+  const sd = $("s-dose"), sds = $("s-dose-sub");
+  if (d){
+    sd.textContent = fmt(d.mgPerKg,1);
+    sd.className = "text-lg font-semibold mt-0.5 " + (d.mgPerKg >= d.target ? "text-success" : "text-danger");
+    sds.textContent = `target ${d.target} · ${fmt(d.mgPerKg/d.target*100,0)}% of target`;
+  } else {
+    sd.textContent = "—"; sd.className = "text-lg font-semibold mt-0.5";
+    sds.textContent = data.missing.length ? "can't calculate: premix batches missing" : "no Bovaer in this report";
+  }
 
   const miss = $("missing");
   if (data.missing.length){
     const l = data.missing.map(m=>`${esc(m.code)} (${m.dm.toFixed(1)} t)`).join(", ");
     miss.className = "alert-warn"; miss.classList.remove("hidden");
     miss.innerHTML = `⚠ This report is missing a premix recipe: ${l}.`
-      + `<span class="sub">That feed can't be broken into ingredients and is NOT in the final list. `
-      + `Re-export the report with the premix batches included before uploading to UpLook.</span>`;
+      + `<span class="sub">That feed can't be broken into ingredients, so it is NOT in the final list and the dose can't be calculated. `
+      + `Re-export the report so it includes that premix's batches before uploading to UpLook.</span>`;
   } else miss.classList.add("hidden");
 
   // step 1 — premix cards
@@ -109,13 +120,11 @@ function fail(msg, detail){
 }
 
 function handleFile(file){
-  lastFile = file;
   const isCsv = file.name.toLowerCase().endsWith(".csv");
-  const frac = (parseFloat($("frac").value)||7.76)/100;
   const rd = new FileReader();
   rd.onload = e => {
     try{
-      const { data, info } = processReport(file.name, e.target.result, frac, window.XLSX);
+      const { data, info } = processReport(file.name, e.target.result, window.XLSX);
       lastName = outputName(file.name);
       show(data, info);
     }catch(err){
@@ -133,7 +142,6 @@ fileInput.onchange = e => { if(e.target.files[0]) handleFile(e.target.files[0]);
 ["dragover","dragenter"].forEach(ev=> drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.add("border-brand","bg-brand/5");}));
 ["dragleave","drop"].forEach(ev=> drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.remove("border-brand","bg-brand/5");}));
 drop.addEventListener("drop", e=>{ if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
-$("frac").onchange = ()=> { if(lastFile) handleFile(lastFile); };
 
 $("dl-xlsx").onclick = ()=>{
   if(!lastRows) return;

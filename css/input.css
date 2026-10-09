@@ -1,12 +1,7 @@
 @tailwind base;
 @tailwind components;
-@tailwind utilities;
 
-@layer base {
-  body { font-family: Inter, system-ui, Segoe UI, Arial, sans-serif; }
-}
-
-/* Outside @layer so Tailwind never purges them (some are only set from JS). */
+/* Plain CSS (never purged; some classes are only set from JS), placed before utilities so `hidden` etc. win. */
 .tnum { font-variant-numeric: tabular-nums; }
 [data-acc] > summary { list-style: none; cursor: pointer; }
 [data-acc] > summary::-webkit-details-marker { display: none; }
@@ -23,3 +18,9 @@
 .alert-ok   { border: 1px solid hsl(142 45% 80%); background: hsl(140 55% 96%); color: hsl(142 55% 25%); }
 .alert-warn { border: 1px solid hsl(0 70% 88%);   background: hsl(0 75% 97%);   color: hsl(0 65% 38%); }
 .alert-warn .sub, .alert-ok .sub { display: block; font-weight: 400; margin-top: .25rem; font-size: 13px; opacity: .95; }
+
+@tailwind utilities;
+
+@layer base {
+  body { font-family: Inter, system-ui, Segoe UI, Arial, sans-serif; }
+}

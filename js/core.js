@@ -6,6 +6,8 @@ const NON_PEN = ["PREMIX","2PRMIX","BOVAR","TOTAL",""];
 const PREMIX_CODES = ["PREMIX","2PRMIX"];
 const HEADERS = ["Producer Ingredient Name","Pounds/Head/Day","Pounds/Month","Tons/Month","Dry Matter/As Fed","Cow Type"];
 const LB_PER_TON = 2000;
+const NOP_IN_BOVAER = 0.10;   // Bovaer 10 label: 10% 3-NOP, as-fed basis
+const DOSE_TARGET = 60;       // mg 3-NOP per kg DM intake
 
 class UserError extends Error {}
 
@@ -87,10 +89,12 @@ const usDate = iso => { const [y,m,d] = iso.split("-").map(Number); return `${m}
 function loadReportToRecords(grid){
   const head = grid[0].map(h => String(h).trim());
   const cRecipe = head.indexOf("Recipe"), cIng = head.indexOf("Ingredient"),
-        cDate = head.indexOf("Load/Delivery date and time"), cDry = head.indexOf("Dry weight");
+        cDate = head.indexOf("Load/Delivery date and time"), cDry = head.indexOf("Dry weight"),
+        cAct = head.indexOf("Actual weight");
   const S = v => (v===undefined||v===null) ? "" : String(v).trim();
+  const lbs = v => parseFloat(S(v).replace(/,/g,"")) || 0;   // Load report weights are in pounds
 
-  const dm = {}, names = {}; let first = "", last = "";
+  const dm = {}, act = {}, names = {}; let first = "", last = "";
   for (const r of grid.slice(1)){
     if (r.length < head.length/2) continue;
     const d = S(r[cDate]).slice(0,10);
@@ -98,9 +102,8 @@ function loadReportToRecords(grid){
     if (!S(r[cIng])) continue;                                   // pen-delivery row
     const rc = codeOf(r[cRecipe]), ing = codeOf(r[cIng]);
     names[rc] = nameOf(r[cRecipe]); if(!(ing in names)) names[ing] = nameOf(r[cIng]);
-    // Load report weights are in pounds.
-    const lb = parseFloat(S(r[cDry]).replace(/,/g,"")) || 0;
-    (dm[rc] = dm[rc] || {})[ing] = (dm[rc][ing] || 0) + lb;
+    (dm[rc] = dm[rc] || {})[ing] = (dm[rc][ing] || 0) + lbs(r[cDry]);
+    (act[rc] = act[rc] || {})[ing] = (act[rc][ing] || 0) + lbs(r[cAct]);
   }
 
   const recipes = Object.keys(dm);
@@ -109,20 +112,18 @@ function loadReportToRecords(grid){
   const excluded = recipes.filter(rc => !lactating.includes(rc) && !premixRecipes.includes(rc));
 
   const recs = [];
-  const push = (pen, type, code, lb) => recs.push({Pen:pen, AvgHeads:"", RowType:type, DisplayName:code,
-      Description: code ? (names[code]||"") : "", DryWt_Ton: lb/LB_PER_TON, Units:"Ton"});
+  const total = o => Object.values(o).reduce((a,b)=>a+b,0);
+  const push = (pen, type, code, dryLb, actLb) => recs.push({Pen:pen, AvgHeads:"", RowType:type, DisplayName:code,
+      Description: code ? (names[code]||"") : "", ActualWt_Ton: actLb/LB_PER_TON, DryWt_Ton: dryLb/LB_PER_TON, Units:"Ton"});
   for (const rc of lactating){
-    Object.entries(dm[rc]).forEach(([ing,lb]) => push(rc, "Ingredient", ing, lb));
-    push(rc, "SubTotal", "", Object.values(dm[rc]).reduce((a,b)=>a+b,0));
+    Object.keys(dm[rc]).forEach(ing => push(rc, "Ingredient", ing, dm[rc][ing], act[rc][ing]));
+    push(rc, "SubTotal", "", total(dm[rc]), total(act[rc]));
   }
   for (const rc of [...PREMIX_CODES, "BOVAR"]) if (dm[rc])
-    Object.entries(dm[rc]).forEach(([ing,lb]) => push(rc, "Ingredient", ing, lb));
+    Object.keys(dm[rc]).forEach(ing => push(rc, "Ingredient", ing, dm[rc][ing], act[rc][ing]));
   if (recs.length && first) recs[0].DateRange = `From ${usDate(first)} until ${usDate(last)}`;
 
-  const bovar = dm.BOVAR || {};
-  const bovarDM = Object.values(bovar).reduce((a,b)=>a+b,0);
   return { recs,
-    bovaerFrac: bovarDM > 0 && bovar.Bovaer ? bovar.Bovaer/bovarDM : null,
     included: lactating.map(rc => names[rc] || rc),
     excluded: excluded.map(rc => names[rc] || rc) };
 }
@@ -135,8 +136,8 @@ function daysInRange(dr){
   return null;
 }
 
-/* ---------- core calculation (validated — unchanged) ---------- */
-function build(recs, additiveFrac){
+/* ---------- core calculation ---------- */
+function build(recs){
   const dateRange = (recs.find(r=>r.DateRange)||{}).DateRange || (recs.find(r=>r._dr)||{})._dr || "";
   const days = daysInRange(dateRange);
   const animalPens = [...new Set(recs
@@ -155,26 +156,26 @@ function build(recs, additiveFrac){
       before[r.DisplayName] = (before[r.DisplayName]||0) + toTons(r.DryWt_Ton, r.Units); });
 
   const premixes = [], missing = [];
-  PREMIX_CODES.forEach(pmx=>{
-    const fedDM = before[pmx] || 0;
-    if(fedDM <= 0) return;
+  // Scale a premix's batch recipe up to the DM actually fed; null if the report has no batches for it.
+  const expand = (pmx, fedDM) => {
     const box = recs.filter(r=>r.Pen===pmx && r.RowType==="Ingredient");
     const batchDM = box.reduce((a,r)=>a+toTons(r.DryWt_Ton,r.Units),0);
-    if(batchDM <= 0){ missing.push({code:pmx, dm:fedDM}); return; }
+    if(batchDM <= 0){ missing.push({code:pmx, dm:fedDM}); return null; }
     const factor = fedDM/batchDM;
     const rows = box.map(r=>{ const b=toTons(r.DryWt_Ton,r.Units);
       return { code:r.DisplayName, desc:desc[r.DisplayName]||"", pct:b/batchDM*100, fedDM:b*factor }; })
       .sort((a,b)=>b.fedDM-a.fedDM);
-    premixes.push({ code:pmx, fedDM, batchDM, factor, rows });
-  });
+    const p = { code:pmx, fedDM, batchDM, factor, rows };
+    premixes.push(p); return p;
+  };
 
   const after = {};
   const add = (k,v)=> after[k]=(after[k]||0)+v;
   Object.entries(before).forEach(([k,v])=>{ if(!PREMIX_CODES.includes(k)) add(k,v); });
-  premixes.forEach(p=> p.rows.forEach(r=> add(r.code, r.fedDM)));
-  let additive=0, corn=0;
-  ["Bovaer","BOVAR"].forEach(bc=>{ if(bc in after){ const b=after[bc]; delete after[bc]; additive+=b*additiveFrac; corn+=b*(1-additiveFrac); }});
-  if(additive){ add("Bovaer", additive); desc["Bovaer"]="Bovaer (3-NOP additive)"; add("GRDCRN", corn); }
+  PREMIX_CODES.forEach(pmx=>{ if((before[pmx]||0) > 0){ const p = expand(pmx, before[pmx]); if(p) p.rows.forEach(r=> add(r.code, r.fedDM)); }});
+  // BOVAR sits inside the premixes, so it is broken out second, from its own batches.
+  if((after.BOVAR||0) > 0){ const fed = after.BOVAR; delete after.BOVAR;
+    const p = expand("BOVAR", fed); if(p) p.rows.forEach(r=> add(r.code, r.fedDM)); }
 
   Object.keys(after).forEach(k=>{ if(after[k]<=0.0005) delete after[k]; });
   Object.keys(before).forEach(k=>{ if(before[k]<=0.0005) delete before[k]; });
@@ -187,13 +188,26 @@ function build(recs, additiveFrac){
   const list = obj => Object.entries(obj).sort((a,b)=>b[1]-a[1]).map(([code,dm])=>({code, desc:desc[code]||"", dm}));
   const sum  = obj => Object.values(obj).reduce((a,b)=>a+b,0);
 
-  return { dateRange, days, totalHeads, herdDM, missing, premixes, reportTotal, mixingDM,
+  // 3-NOP is labelled on an as-fed basis, so convert Bovaer DM back using its DM% from the report.
+  const bov = recs.filter(r=>r.DisplayName==="Bovaer" && r.RowType==="Ingredient");
+  const bovDry = bov.reduce((a,r)=>a+toTons(r.DryWt_Ton,r.Units),0);
+  const bovAct = bov.reduce((a,r)=>a+toTons(r.ActualWt_Ton,r.Units),0);
+  const bovaerAsFed = after.Bovaer && bovDry > 0 && bovAct > 0 ? after.Bovaer * bovAct/bovDry : null;
+  const dose = bovaerAsFed && herdDM > 0 && !missing.length
+    ? { mgPerKg: bovaerAsFed*NOP_IN_BOVAER/herdDM*1e6, target: DOSE_TARGET, bovaerAsFed, bovaerDmPct: bovDry/bovAct*100 }
+    : null;
+
+  return { dateRange, days, totalHeads, herdDM, missing, premixes, reportTotal, mixingDM, dose,
            before:list(before), after:list(after), beforeTotal:sum(before), afterTotal:sum(after) };
 }
 
 /* ---------- entry point: file contents -> result ---------- */
-// content: string for .csv, ArrayBuffer/Uint8Array for .xls/.xlsx. settingFrac is a fraction (0.0776).
-function processReport(fileName, content, settingFrac, XLSX){
+// The older ingredient report codes the BOVAR blend as "Bovaer" everywhere except inside the BOVAR batch section.
+const legacyBovar = recs => { recs.forEach(r => { if (r.DisplayName === "Bovaer" && r.Pen !== "BOVAR"){
+  r.DisplayName = "BOVAR"; r.Description = "Bovaer Premix"; } }); return recs; };
+
+// content: string for .csv, ArrayBuffer/Uint8Array for .xls/.xlsx.
+function processReport(fileName, content, XLSX){
   const lower = fileName.toLowerCase();
   const isCsv = lower.endsWith(".csv"), isXls = lower.endsWith(".xls") || lower.endsWith(".xlsx");
   if (!isCsv && !isXls)
@@ -206,16 +220,14 @@ function processReport(fileName, content, settingFrac, XLSX){
       const lr = loadReportToRecords(grid);
       if (!lr.included.length)
         throw new UserError("No milking-cow rations were found in that Load report (no ration contains PREMIX or 2PRMIX). Check the date range and try again.");
-      const frac = lr.bovaerFrac ?? settingFrac;
-      return { data: build(lr.recs, frac), info: { source:"Load report", included:lr.included, excluded:lr.excluded,
-               bovaerFrac:frac, bovaerFracFromReport: lr.bovaerFrac !== null } };
+      return { data: build(lr.recs), info: { source:"Load report", included:lr.included, excluded:lr.excluded } };
     }
     if (head[0] === "Ingredient" && head.includes("Loaded weight"))
       throw new UserError("That's the Ingredient/Premix Usage summary. It adds the premix mixing loads on top of what the cows ate and doesn't show what's in each premix, so it can't be used. Export the Load report (CSV) instead.");
     const recs = toRecords(grid);
     if (!recs.length || !("DryWt_Ton" in recs[0]))
       throw new UserError("That CSV doesn't look like a TMR Tracker report. Export the Load report (CSV) or the monthly ingredient report and try again.");
-    return { data: build(recs, settingFrac), info: { source:"Ingredient report", bovaerFrac:settingFrac, bovaerFracFromReport:false } };
+    return { data: build(legacyBovar(recs)), info: { source:"Ingredient report" } };
   }
 
   const wb = XLSX.read(content, {type:"array"});
@@ -227,14 +239,14 @@ function processReport(fileName, content, settingFrac, XLSX){
   const recs = rowsToRecords(rows);
   if(!recs.length) throw new UserError("Couldn't find ingredient rows in that Excel file. Make sure it's the TMR Tracker ingredient report.");
   if(dateRange) recs.forEach(r=> r._dr = dateRange);
-  return { data: build(recs, settingFrac), info: { source:"Ingredient report", bovaerFrac:settingFrac, bovaerFracFromReport:false } };
+  return { data: build(legacyBovar(recs)), info: { source:"Ingredient report" } };
 }
 
 const uploadRows = data => data.after.map(r => [r.code, "", "", +r.dm.toFixed(3), "Dry Matter", "Lactating"]);
 const outputName = fileName => "UpLook_Ingredient_Upload_" + fileName.replace(/\.(csv|xlsx?)$/i, "");
 
-const api = { NON_PEN, PREMIX_CODES, HEADERS, UserError, parseCSV, toRecords, rowsToRecords, loadReportToRecords,
-              toTons, daysInRange, build, processReport, uploadRows, outputName };
+const api = { NON_PEN, PREMIX_CODES, HEADERS, NOP_IN_BOVAER, DOSE_TARGET, UserError, parseCSV, toRecords, rowsToRecords,
+              loadReportToRecords, toTons, daysInRange, build, processReport, uploadRows, outputName };
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 else root.TMRCore = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
