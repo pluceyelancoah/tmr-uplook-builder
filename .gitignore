@@ -1,3 +1,5 @@
 node_modules/
 # Real farm reports and their snapshots — never publish (this repo is public).
 raw/
+# Raw screenshots (may show logged-in user); curated copies live in img/.
+assets/
