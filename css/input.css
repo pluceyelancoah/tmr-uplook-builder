@@ -8,10 +8,6 @@
 [data-acc][open] .chev { transform: rotate(180deg); }
 .scrollbox { scrollbar-width: thin; }
 
-.step {
-  flex: none; display: inline-flex; height: 1.6rem; width: 1.6rem; align-items: center; justify-content: center;
-  border-radius: 9999px; background: hsl(212 64% 30%); color: #fff; font-size: .8rem; font-weight: 600;
-}
 .alert-ok, .alert-warn {
   display: block; border-radius: .6rem; padding: .75rem 1rem; font-weight: 600; font-size: 14px;
 }

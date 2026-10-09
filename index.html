@@ -31,22 +31,29 @@
 
 <main class="max-w-4xl mx-auto px-5 py-7 space-y-6">
 
-  <!-- how to use -->
+  <!-- upload -->
   <section class="bg-card border border-border rounded-xl shadow-card p-6">
-    <h2 class="text-sm font-semibold text-brand uppercase tracking-wide mb-3">How to use</h2>
-    <ol class="space-y-2 text-[15px]">
-      <li class="flex gap-3"><span class="step">1</span><span>In your <b>TMR Tracker</b> feed system, export the <b>Load report</b> for the full month as <b>CSV</b>. The older monthly ingredient report (CSV or Excel) still works too.</span></li>
-      <li class="flex gap-3"><span class="step">2</span><span>Drop that file in the box below.</span></li>
-      <li class="flex gap-3"><span class="step">3</span><span>Review the three steps so you can see the premixes broken down and the totals line up.</span></li>
-      <li class="flex gap-3"><span class="step">4</span><span>Click <b>Download file for UpLook</b>, then open <b>UpLook</b> separately and upload that file there.</span></li>
-    </ol>
+    <div id="drop" role="button" tabindex="0" aria-label="Choose or drop your TMR Tracker file"
+      class="group rounded-xl border-2 border-dashed border-border hover:border-brand focus-visible:border-brand
+             focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/20
+             bg-muted/30 hover:bg-brand/5 transition cursor-pointer px-6 py-10 text-center">
+      <svg class="mx-auto h-10 w-10 text-brand/70 group-hover:text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9m0 0L8.5 12.5M12 9l3.5 3.5M6 20h12a3 3 0 0 0 .5-5.96A5 5 0 0 0 9.1 8.5 3.5 3.5 0 0 0 5.5 20Z"/>
+      </svg>
+      <p id="drop-title" class="mt-3 text-lg font-medium text-foreground break-all">Drop your TMR Tracker Load report here</p>
+      <p id="drop-sub" class="mt-1 text-sm text-muted-foreground">or click to choose it</p>
+      <input id="file" type="file" accept=".csv,.xls,.xlsx" class="hidden">
+    </div>
+    <p class="mt-4 text-[13px] text-muted-foreground">
+      Export the <b>Load report</b> from TMR Tracker for the <b>full month</b> as <b>CSV</b>. The older monthly ingredient
+      report (CSV or Excel) also works. Runs entirely on your computer — your feed data never leaves this page.</p>
 
-    <details data-acc class="mt-4 rounded-lg border border-border bg-muted/20 p-4 text-sm">
-      <summary class="flex items-center gap-2 font-medium text-brand select-none">
+    <details data-acc class="mt-3 text-sm">
+      <summary class="flex items-center gap-2 text-muted-foreground hover:text-foreground select-none">
         <svg class="chev h-4 w-4 transition" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
-        Show me how to export the older monthly ingredient report
+        How to export the older monthly ingredient report
       </summary>
-      <div class="mt-4 space-y-6">
+      <div class="mt-4 space-y-6 rounded-lg border border-border bg-muted/20 p-4">
         <figure>
           <img src="img/export-step1-reports-menu.jpg" alt="TMR Tracker Reports menu — choose Ingredient Usage by Pen"
                class="w-full rounded-md border border-border shadow-sm">
@@ -57,93 +64,13 @@
                class="w-full rounded-md border border-border shadow-sm">
           <figcaption class="mt-2 text-[13px] text-muted-foreground"><b>2.</b> Set the date range to the full month.</figcaption>
         </figure>
+        <ol start="3" class="space-y-1.5 text-[13px] text-muted-foreground list-decimal pl-5">
+          <li>In the <b>bottom-right corner</b>, set the <b>template chooser</b> to the <b>Elanco</b> template — this makes sure the correct columns are exported.</li>
+          <li>Click <b>Export</b> and save the file as CSV or Excel.</li>
+        </ol>
       </div>
-      <ol start="3" class="mt-4 space-y-1.5 text-[13px] text-muted-foreground list-decimal pl-5">
-        <li>In the <b>bottom-right corner</b>, set the <b>template chooser</b> to the <b>Elanco</b> template — this makes sure the correct columns are exported.</li>
-        <li>Click <b>Export</b> and save the file as CSV or Excel.</li>
-      </ol>
     </details>
-
-    <p class="text-[13px] text-muted-foreground mt-4 border-t border-border pt-3">
-      Runs entirely on your computer — your feed data never leaves this page. Amounts are <b>dry matter</b>;
-      ingredients are named by their <b>feed code</b> (report descriptions aren't always reliable).</p>
   </section>
-
-  <!-- dropzone -->
-  <section class="bg-card border border-border rounded-xl shadow-card p-6">
-    <div id="drop" role="button" tabindex="0" aria-label="Choose or drop your TMR Tracker file"
-      class="group rounded-xl border-2 border-dashed border-border hover:border-brand focus-visible:border-brand
-             focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/20
-             bg-muted/30 hover:bg-brand/5 transition cursor-pointer px-6 py-12 text-center">
-      <svg class="mx-auto h-10 w-10 text-brand/70 group-hover:text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9m0 0L8.5 12.5M12 9l3.5 3.5M6 20h12a3 3 0 0 0 .5-5.96A5 5 0 0 0 9.1 8.5 3.5 3.5 0 0 0 5.5 20Z"/>
-      </svg>
-      <p class="mt-3 text-lg font-medium text-foreground">Drop your TMR Tracker file here</p>
-      <p class="mt-1 text-sm text-muted-foreground">or click to choose it — Load report (.csv), or the older ingredient report (.csv, .xls, .xlsx)</p>
-      <input id="file" type="file" accept=".csv,.xls,.xlsx" class="hidden">
-    </div>
-  </section>
-
-  <!-- results -->
-  <div id="result" class="hidden space-y-6">
-
-    <!-- status + stats -->
-    <section class="bg-card border border-border rounded-xl shadow-card p-6 space-y-4">
-      <div id="success" class="alert-ok"></div>
-      <div id="missing" class="hidden"></div>
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div class="rounded-lg border border-border bg-muted/40 px-4 py-3">
-          <div class="text-xs text-muted-foreground">Reporting period</div><div id="s-period" class="text-[15px] font-semibold mt-0.5">—</div></div>
-        <div class="rounded-lg border border-border bg-muted/40 px-4 py-3">
-          <div class="text-xs text-muted-foreground">Days in period</div><div id="s-days" class="text-lg font-semibold mt-0.5">—</div></div>
-        <div class="rounded-lg border border-border bg-muted/40 px-4 py-3">
-          <div class="text-xs text-muted-foreground">Ingredients (final)</div><div id="s-count" class="text-lg font-semibold mt-0.5">—</div></div>
-        <div class="rounded-lg border border-border bg-muted/40 px-4 py-3">
-          <div class="text-xs text-muted-foreground">Bovaer dose (mg 3-NOP / kg DM)</div><div id="s-dose" class="text-lg font-semibold mt-0.5">—</div>
-          <div id="s-dose-sub" class="text-xs text-muted-foreground"></div></div>
-      </div>
-      <div id="source" class="text-[13px] text-muted-foreground"></div>
-    </section>
-
-    <!-- the three steps in one cohesive card -->
-    <section class="bg-card border border-border rounded-xl shadow-card divide-y divide-border">
-      <!-- step 1 -->
-      <div class="p-6">
-        <div class="flex items-start gap-3 mb-1"><span class="step mt-0.5">1</span>
-          <div><h3 class="text-base font-semibold">Premixes, calculated by ingredient</h3>
-          <p class="text-sm text-muted-foreground">What each premix is made of, scaled up to the amount actually fed this month.</p></div></div>
-        <div id="premixes" class="mt-4 space-y-3"></div>
-      </div>
-      <!-- step 2 -->
-      <div class="p-6">
-        <div class="flex items-start gap-3 mb-1"><span class="step mt-0.5">2</span>
-          <div><h3 class="text-base font-semibold">Herd totals — premixes NOT broken out</h3>
-          <p class="text-sm text-muted-foreground">Everything the herd ate, with each premix still counted as one line.</p></div></div>
-        <div class="mt-4 rounded-lg border border-border overflow-hidden">
-          <div class="max-h-80 overflow-auto scrollbox"><table id="before" class="w-full text-sm"></table></div>
-        </div>
-        <div id="reportnote" class="hidden mt-3 text-[13px] text-muted-foreground bg-muted/40 border border-border rounded-lg p-3"></div>
-      </div>
-      <!-- step 3 -->
-      <div class="p-6">
-        <div class="flex items-start gap-3 mb-1"><span class="step mt-0.5">3</span>
-          <div><h3 class="text-base font-semibold">Final — premixes broken out</h3>
-          <p class="text-sm text-muted-foreground">Each premix replaced by the real feeds inside it. Same total as Step 2 — this is what uploads.</p></div></div>
-        <div id="recon" class="mt-4"></div>
-        <div class="mt-3 rounded-lg border border-border overflow-hidden">
-          <div class="max-h-80 overflow-auto scrollbox"><table id="after" class="w-full text-sm"></table></div>
-        </div>
-        <div class="mt-5 flex flex-wrap items-center gap-4">
-          <button id="dl-xlsx" class="inline-flex items-center gap-2 bg-primary text-primary-foreground rounded-lg px-5 py-2.5 text-sm font-semibold shadow-sm hover:opacity-90 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/25">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
-            Download file for UpLook (.xlsx)</button>
-          <button id="dl-csv" class="text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 rounded">download as CSV instead</button>
-        </div>
-        <p class="text-[13px] text-muted-foreground mt-2">Saves to your Downloads folder, then upload it to UpLook yourself.
-          Only <b>Tons/Month</b> is filled — UpLook takes one unit and your feed is in tons.</p>
-      </div>
-    </section>
-  </div>
 
   <!-- error -->
   <section id="error" class="hidden bg-danger-bg border border-danger-border rounded-xl p-5">
@@ -153,6 +80,72 @@
     <p id="error-msg" class="text-[15px] mt-1"></p>
     <p id="error-detail" class="text-[13px] text-muted-foreground mt-2"></p>
   </section>
+
+  <!-- results -->
+  <div id="result" class="hidden space-y-6">
+
+    <!-- summary + download -->
+    <section class="bg-card border border-border rounded-xl shadow-card p-6 space-y-4">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0">
+          <div class="text-xs text-muted-foreground">Report</div>
+          <div id="r-file" class="font-semibold break-all"></div>
+          <div id="r-period" class="text-sm text-muted-foreground"></div>
+        </div>
+        <div class="sm:text-right">
+          <div class="text-xs text-muted-foreground">Bovaer dose</div>
+          <div><span id="r-dose" class="text-3xl font-semibold tnum">—</span>
+            <span class="text-sm text-muted-foreground">mg 3-NOP / kg DM</span></div>
+          <div id="r-dose-sub" class="text-xs text-muted-foreground"></div>
+        </div>
+      </div>
+      <div id="recon"></div>
+      <div id="missing" class="hidden"></div>
+      <div class="flex flex-wrap items-center gap-4 pt-1">
+        <button id="dl-xlsx" class="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold shadow-sm hover:opacity-90 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/25">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
+          <span id="dl-label">Download for UpLook (.xlsx)</span></button>
+        <button id="dl-csv" class="text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 rounded">or download as CSV</button>
+      </div>
+      <p class="text-[13px] text-muted-foreground">Saves to your Downloads folder, then upload it to UpLook yourself.
+        Only <b>Tons/Month</b> is filled — UpLook takes one unit and your feed is in tons.</p>
+    </section>
+
+    <!-- what uploads -->
+    <section class="bg-card border border-border rounded-xl shadow-card p-6">
+      <h2 class="text-base font-semibold">What will be uploaded <span id="after-count" class="text-muted-foreground font-normal"></span></h2>
+      <p class="text-sm text-muted-foreground">Tons of dry matter for the period, by feed code (report names aren't always reliable).
+        Premixes are already broken out into the feeds inside them.</p>
+      <div class="mt-4 rounded-lg border border-border overflow-hidden">
+        <div class="max-h-96 overflow-auto scrollbox"><table id="after" class="w-full text-sm"></table></div>
+      </div>
+    </section>
+
+    <!-- working -->
+    <details data-acc class="bg-card border border-border rounded-xl shadow-card">
+      <summary class="flex items-center gap-2 p-6 select-none">
+        <svg class="chev h-4 w-4 text-brand transition" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+        <span class="font-semibold">Show the working</span>
+        <span class="text-sm text-muted-foreground hidden sm:inline">— rations included, dose, premix breakdowns, totals before breakdown</span>
+      </summary>
+      <div class="px-6 pb-6 space-y-8">
+        <div id="source" class="text-sm space-y-1.5"></div>
+        <div>
+          <h3 class="text-base font-semibold">Premixes broken out</h3>
+          <p class="text-sm text-muted-foreground">What each premix is made of, scaled to the amount fed this period.</p>
+          <div id="premixes" class="mt-4 space-y-3"></div>
+        </div>
+        <div>
+          <h3 class="text-base font-semibold">Totals before breakdown</h3>
+          <p class="text-sm text-muted-foreground">Everything the cows ate, with each premix still counted as one line. Same total as the upload list.</p>
+          <div class="mt-4 rounded-lg border border-border overflow-hidden">
+            <div class="max-h-80 overflow-auto scrollbox"><table id="before" class="w-full text-sm"></table></div>
+          </div>
+          <div id="reportnote" class="hidden mt-3 text-[13px] text-muted-foreground bg-muted/40 border border-border rounded-lg p-3"></div>
+        </div>
+      </div>
+    </details>
+  </div>
 
   <footer class="text-center text-xs text-muted-foreground pt-2 pb-6">Built by Pádraig Lucey, Elanco AH · UpLook</footer>
 </main>
