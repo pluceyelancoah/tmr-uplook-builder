@@ -1,6 +1,7 @@
-# TMR Tracker → UpLook Sheet Builder
+# TapFeed / TMR Tracker → UpLook Sheet Builder
 
-Static page that turns a monthly TMR Tracker export into the ingredient sheet UpLook accepts.
+Static page that turns a monthly TapFeed Load report (or the older TMR Tracker ingredient
+report) into the ingredient sheet UpLook accepts.
 Premixes (PREMIX, 2PRMIX) are broken out into their raw ingredients, and then the Bovaer
 Premix (BOVAR) is broken out into Bovaer and ground corn. Each one uses its own batch recipe
 from the same report; there are no built-in defaults. If a premix's batches are missing, the
@@ -14,9 +15,9 @@ Live: https://pluceyelancoah.github.io/tmr-uplook-builder/ (GitHub Pages, `main`
 ## Supported reports
 | Report | Format | Notes |
 |---|---|---|
-| **Load report** | CSV | Preferred. Rations that contain PREMIX/2PRMIX count as milking cows. A month with no BOVAR batch made in it can't be broken out. |
-| Ingredient report (older) | Excel or derived CSV | Only works if the export includes the BOVAR batch section. Outside that section, the code `Bovaer` means the BOVAR blend. |
-| Ingredient/Premix Usage | CSV | Rejected: it double counts the premix mixing loads and doesn't show what's in each premix. |
+| **TapFeed Load report** | CSV | Preferred. Rations that contain PREMIX/2PRMIX count as milking cows. A month with no BOVAR batch made in it can't be broken out. |
+| TMR Tracker ingredient report (older) | Excel or derived CSV | Only works if the export includes the BOVAR batch section. Outside that section, the code `Bovaer` means the BOVAR blend. |
+| TapFeed Ingredient/Premix Usage | CSV | Rejected: it double counts the premix mixing loads and doesn't show what's in each premix. |
 
 ## Layout
 - `index.html`: markup only

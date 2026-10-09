@@ -1,7 +1,7 @@
 {
   "name": "tmr-uplook-builder",
   "private": true,
-  "description": "Converts a monthly TMR Tracker ingredient report into an UpLook upload sheet. Static site served by GitHub Pages.",
+  "description": "Converts a monthly TapFeed Load report or TMR Tracker ingredient report into an UpLook upload sheet. Static site served by GitHub Pages.",
   "scripts": {
     "build": "npm run build:css && npm run build:vendor",
     "build:css": "tailwindcss -c tailwind.config.js -i css/input.css -o css/app.css --minify",

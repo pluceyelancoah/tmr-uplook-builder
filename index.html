@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-<title>TMR Tracker → UpLook Sheet Builder</title>
+<title>TapFeed / TMR Tracker → UpLook Sheet Builder</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link href="css/app.css" rel="stylesheet">
@@ -21,7 +21,7 @@
     <div class="flex items-center gap-3">
       <div class="h-9 w-9 rounded-lg bg-brand flex items-center justify-center text-white font-bold text-[11px] tracking-tight">TMR</div>
       <div>
-        <h1 class="text-[17px] font-semibold leading-tight">TMR Tracker → UpLook Sheet Builder</h1>
+        <h1 class="text-[17px] font-semibold leading-tight">TapFeed / TMR Tracker → UpLook Sheet Builder</h1>
         <p class="text-xs text-muted-foreground">Monthly feed ingredient builder</p>
       </div>
     </div>
@@ -33,25 +33,25 @@
 
   <!-- upload -->
   <section class="bg-card border border-border rounded-xl shadow-card p-6">
-    <div id="drop" role="button" tabindex="0" aria-label="Choose or drop your TMR Tracker file"
+    <div id="drop" role="button" tabindex="0" aria-label="Choose or drop your TapFeed or TMR Tracker file"
       class="group rounded-xl border-2 border-dashed border-border hover:border-brand focus-visible:border-brand
              focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/20
              bg-muted/30 hover:bg-brand/5 transition cursor-pointer px-6 py-10 text-center">
       <svg class="mx-auto h-10 w-10 text-brand/70 group-hover:text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9m0 0L8.5 12.5M12 9l3.5 3.5M6 20h12a3 3 0 0 0 .5-5.96A5 5 0 0 0 9.1 8.5 3.5 3.5 0 0 0 5.5 20Z"/>
       </svg>
-      <p id="drop-title" class="mt-3 text-lg font-medium text-foreground break-all">Drop your TMR Tracker Load report here</p>
+      <p id="drop-title" class="mt-3 text-lg font-medium text-foreground break-all">Drop your TapFeed Load report here</p>
       <p id="drop-sub" class="mt-1 text-sm text-muted-foreground">or click to choose it</p>
       <input id="file" type="file" accept=".csv,.xls,.xlsx" class="hidden">
     </div>
     <p class="mt-4 text-[13px] text-muted-foreground">
-      Export the <b>Load report</b> from TMR Tracker for the <b>full month</b> as <b>CSV</b>. The older monthly ingredient
-      report (CSV or Excel) also works. Runs entirely on your computer — your feed data never leaves this page.</p>
+      Export the <b>Load report</b> from <b>TapFeed</b> for the <b>full month</b> as <b>CSV</b>. The older <b>TMR Tracker</b>
+      monthly ingredient report (CSV or Excel) also works. Runs entirely on your computer — your feed data never leaves this page.</p>
 
     <details data-acc class="mt-3 text-sm">
       <summary class="flex items-center gap-2 text-muted-foreground hover:text-foreground select-none">
         <svg class="chev h-4 w-4 transition" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
-        How to export the older monthly ingredient report
+        How to export the older TMR Tracker ingredient report
       </summary>
       <div class="mt-4 space-y-6 rounded-lg border border-border bg-muted/20 p-4">
         <figure>

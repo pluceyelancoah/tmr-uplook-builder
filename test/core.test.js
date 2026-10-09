@@ -27,7 +27,7 @@ const LOAD_REPORT = [
 
 test("Load report: premixes and BOVAR broken out, totals reconcile, dose on as-fed Bovaer", () => {
   const { data, info } = C.processReport("Load_report.csv", LOAD_REPORT, XLSX);
-  assert.equal(info.source, "Load report");
+  assert.equal(info.source, "TapFeed Load report");
   assert.deepEqual(info.included, ["HIGH COW"]);
   assert.deepEqual(info.excluded, ["DRY COW"]);
   assert.deepEqual(data.premixes.map(p => p.code), ["PREMIX", "BOVAR"]);
@@ -83,7 +83,7 @@ test("Legacy derived CSV: BOVAR broken out from its own batch section", () => {
     "BOVAR,,Ingredient,Bovaer,Bovaer,0.1,0.1,Ton,From 4/1/2026 until 4/30/2026",
   ].join("\n");
   const { data, info } = C.processReport("April.csv", csv, XLSX);
-  assert.equal(info.source, "Ingredient report");
+  assert.equal(info.source, "TMR Tracker ingredient report");
   assert.equal(data.days, 30);
   const t = byCode(data);
   close(t.CANOLA, 0.75, "CANOLA");

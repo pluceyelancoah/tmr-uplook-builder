@@ -79,7 +79,7 @@ function rowsToRecords(rows){
   return recs;
 }
 
-/* ---------- TMR Tracker Load report (CSV, one row per ingredient load or pen delivery) ---------- */
+/* ---------- TapFeed Load report (CSV, one row per ingredient load or pen delivery) ---------- */
 const codeOf = s => { const m = String(s).match(/\(([^()]*)\)\s*$/); return m ? m[1].trim() : String(s).trim(); };
 const nameOf = s => String(s).replace(/\s*\([^()]*\)\s*$/, "").trim();
 const usDate = iso => { const [y,m,d] = iso.split("-").map(Number); return `${m}/${d}/${y}`; };
@@ -211,7 +211,7 @@ function processReport(fileName, content, XLSX){
   const lower = fileName.toLowerCase();
   const isCsv = lower.endsWith(".csv"), isXls = lower.endsWith(".xls") || lower.endsWith(".xlsx");
   if (!isCsv && !isXls)
-    throw new UserError("That isn't a TMR Tracker export. Use the CSV or Excel (.xls/.xlsx) file from the TMR Tracker.");
+    throw new UserError("That isn't a feed report. Use the TapFeed Load report (CSV) or the TMR Tracker ingredient report (CSV or Excel).");
 
   if (isCsv){
     const grid = parseCSV(content).filter(r => !String(r[0]||"").startsWith("#"));
@@ -220,26 +220,26 @@ function processReport(fileName, content, XLSX){
       const lr = loadReportToRecords(grid);
       if (!lr.included.length)
         throw new UserError("No milking-cow rations were found in that Load report (no ration contains PREMIX or 2PRMIX). Check the date range and try again.");
-      return { data: build(lr.recs), info: { source:"Load report", included:lr.included, excluded:lr.excluded } };
+      return { data: build(lr.recs), info: { source:"TapFeed Load report", included:lr.included, excluded:lr.excluded } };
     }
     if (head[0] === "Ingredient" && head.includes("Loaded weight"))
-      throw new UserError("That's the Ingredient/Premix Usage summary. It adds the premix mixing loads on top of what the cows ate and doesn't show what's in each premix, so it can't be used. Export the Load report (CSV) instead.");
+      throw new UserError("That's the Ingredient/Premix Usage summary. It adds the premix mixing loads on top of what the cows ate and doesn't show what's in each premix, so it can't be used. Export the TapFeed Load report (CSV) instead.");
     const recs = toRecords(grid);
     if (!recs.length || !("DryWt_Ton" in recs[0]))
-      throw new UserError("That CSV doesn't look like a TMR Tracker report. Export the Load report (CSV) or the monthly ingredient report and try again.");
-    return { data: build(legacyBovar(recs)), info: { source:"Ingredient report" } };
+      throw new UserError("That CSV doesn't look like a TapFeed or TMR Tracker report. Export the TapFeed Load report (CSV) and try again.");
+    return { data: build(legacyBovar(recs)), info: { source:"TMR Tracker ingredient report" } };
   }
 
   const wb = XLSX.read(content, {type:"array"});
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:""});
   if (rows.some(r => r.some(c => String(c).trim() === "Load Report")))
-    throw new UserError("That's the Load report in Excel format. Export the Load report as CSV instead.");
+    throw new UserError("That's a Load report in Excel format. Export the TapFeed Load report as CSV instead.");
   let dateRange = "";
   for(const r of rows){ for(const c of r){ const s=String(c||""); if(/From .*until/i.test(s)){ dateRange=s.trim(); break; } } if(dateRange) break; }
   const recs = rowsToRecords(rows);
   if(!recs.length) throw new UserError("Couldn't find ingredient rows in that Excel file. Make sure it's the TMR Tracker ingredient report.");
   if(dateRange) recs.forEach(r=> r._dr = dateRange);
-  return { data: build(legacyBovar(recs)), info: { source:"Ingredient report" } };
+  return { data: build(legacyBovar(recs)), info: { source:"TMR Tracker ingredient report" } };
 }
 
 const uploadRows = data => data.after.map(r => [r.code, "", "", +r.dm.toFixed(3), "Dry Matter", "Lactating"]);
