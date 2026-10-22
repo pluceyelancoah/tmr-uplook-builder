@@ -5,13 +5,14 @@
   "scripts": {
     "build": "npm run build:css && npm run build:vendor",
     "build:css": "tailwindcss -c tailwind.config.js -i css/input.css -o css/app.css --minify",
-    "build:vendor": "node -e \"require('fs').copyFileSync(require.resolve('xlsx/dist/xlsx.full.min.js'), 'vendor/xlsx.full.min.js')\"",
+    "build:vendor": "node -e \"const fs=require('fs');fs.copyFileSync(require.resolve('xlsx/dist/xlsx.full.min.js'),'vendor/xlsx.full.min.js');fs.copyFileSync(require.resolve('jspdf/dist/jspdf.umd.min.js'),'vendor/jspdf.umd.min.js')\"",
     "watch:css": "tailwindcss -c tailwind.config.js -i css/input.css -o css/app.css --watch",
     "serve": "npx --yes http-server -c-1 -p 8080 .",
     "test": "node --test \"test/*.test.js\"",
     "snapshot": "node test/snapshot.js"
   },
   "devDependencies": {
+    "jspdf": "^4.2.1",
     "tailwindcss": "^3.4.19",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }

@@ -8,6 +8,8 @@ const HEADERS = ["Producer Ingredient Name","Pounds/Head/Day","Pounds/Month","To
 const LB_PER_TON = 2000;
 const NOP_IN_BOVAER = 0.10;   // Bovaer 10 label: 10% 3-NOP, as-fed basis
 const DOSE_TARGET = 60;       // mg 3-NOP per kg DM intake
+const LABEL_MIN = 60, LABEL_MAX = 63;   // Bovaer Dose Calculator "on target" band
+const MG_PER_LB = 453592.37, KG_PER_LB = 0.45359237;
 
 class UserError extends Error {}
 
@@ -196,9 +198,44 @@ function build(recs){
   const dose = bovaerAsFed && herdDM > 0 && !missing.length
     ? { mgPerKg: bovaerAsFed*NOP_IN_BOVAER/herdDM*1e6, target: DOSE_TARGET, bovaerAsFed, bovaerDmPct: bovDry/bovAct*100 }
     : null;
+  const calculator = dose ? calculatorInputs(recs, premixes, before, herdDM, bovAct, bovDry) : null;
 
-  return { dateRange, days, totalHeads, herdDM, missing, premixes, reportTotal, mixingDM, dose,
+  return { dateRange, days, totalHeads, herdDM, missing, premixes, reportTotal, mixingDM, dose, calculator,
            before:list(before), after:list(after), beforeTotal:sum(before), afterTotal:sum(after) };
+}
+
+/* ---------- Bovaer Dose Calculator inputs ---------- */
+// The same numbers the Bovaer Dose Calculator takes in "Bovaer in Blend" mode, nested in a premix, all as-fed.
+// Nested % is set so each source carries exactly the Bovaer the breakdown above found, so the calculator's dose matches.
+function calculatorInputs(recs, premixes, before, herdDM, bovAct, bovDry){
+  const penSum = (pen, k) => recs.filter(r => r.Pen === pen && r.RowType === "Ingredient")
+                                 .reduce((a, r) => a + toTons(r[k], r.Units), 0);
+  const bovarAF = penSum("BOVAR", "ActualWt_Ton"), bovarDM = penSum("BOVAR", "DryWt_Ton");
+  const bovarBox = premixes.find(p => p.code === "BOVAR");
+  const bovaerDmShare = ((bovarBox && bovarBox.rows.find(r => r.code === "Bovaer")) || {pct:0}).pct / 100;
+  const inclusionPct = bovarAF > 0 ? bovAct / bovarAF * 100 : 0;
+  const mgOf = bovaerAFtons => bovaerAFtons * LB_PER_TON * NOP_IN_BOVAER * MG_PER_LB;
+
+  const sources = [];
+  premixes.filter(p => PREMIX_CODES.includes(p.code)).forEach(p => {
+    const bovarRow = p.rows.find(r => r.code === "BOVAR");
+    if (!bovarRow || bovarRow.fedDM <= 0) return;
+    const dmPct = penSum(p.code, "DryWt_Ton") / penSum(p.code, "ActualWt_Ton") * 100;
+    const quantityLb = p.fedDM / (dmPct / 100) * LB_PER_TON;
+    const bovaerAF = bovarRow.fedDM * bovaerDmShare * bovAct / bovDry;
+    sources.push({ code: p.code, name: (recs.find(r => r.DisplayName === p.code && r.Description) || {}).Description || p.code,
+      quantityLb, dmPct, inclusionPct, nestedPct: bovaerAF * LB_PER_TON / (quantityLb * inclusionPct / 100) * 100,
+      bovaerLb: bovaerAF * LB_PER_TON, nopMg: mgOf(bovaerAF) });
+  });
+  if ((before.BOVAR || 0) > 0 && bovarDM > 0){            // Bovaer premix fed straight into a ration
+    const bovaerAF = before.BOVAR * bovaerDmShare * bovAct / bovDry;
+    sources.push({ code: "BOVAR", name: "Bovaer Premix", quantityLb: before.BOVAR / (bovarDM / bovarAF) * LB_PER_TON,
+      dmPct: bovarDM / bovarAF * 100, inclusionPct, nestedPct: null, bovaerLb: bovaerAF * LB_PER_TON, nopMg: mgOf(bovaerAF) });
+  }
+  const totalFeedLbDM = herdDM * LB_PER_TON, totalFeedKgDM = totalFeedLbDM * KG_PER_LB;
+  const totalNopMg = sources.reduce((a, s) => a + s.nopMg, 0);
+  return { sources, totalFeedLbDM, totalFeedKgDM, totalNopMg, mgPerKg: totalNopMg / totalFeedKgDM,
+           labelMin: LABEL_MIN, labelMax: LABEL_MAX };
 }
 
 /* ---------- entry point: file contents -> result ---------- */
@@ -214,13 +251,16 @@ function processReport(fileName, content, XLSX){
     throw new UserError("That isn't a feed report. Use the TapFeed Load report (CSV) or the TMR Tracker ingredient report (CSV or Excel).");
 
   if (isCsv){
-    const grid = parseCSV(content).filter(r => !String(r[0]||"").startsWith("#"));
+    const all = parseCSV(content);
+    const farmLine = all.find(r => /^#\s*Farm:/i.test(String(r[0]||"")));
+    const farm = farmLine ? String(farmLine[0]).replace(/^#\s*Farm:\s*/i, "").trim() : "";
+    const grid = all.filter(r => !String(r[0]||"").startsWith("#"));
     const head = (grid[0] || []).map(h => String(h).trim());
     if (head.includes("BatchId") && head.includes("Recipe") && head.includes("Dry weight")){
       const lr = loadReportToRecords(grid);
       if (!lr.included.length)
         throw new UserError("No milking-cow rations were found in that Load report (no ration contains PREMIX or 2PRMIX). Check the date range and try again.");
-      return { data: build(lr.recs), info: { source:"TapFeed Load report", included:lr.included, excluded:lr.excluded } };
+      return { data: build(lr.recs), info: { source:"TapFeed Load report", farm, included:lr.included, excluded:lr.excluded } };
     }
     if (head[0] === "Ingredient" && head.includes("Loaded weight"))
       throw new UserError("That's the Ingredient/Premix Usage summary. It adds the premix mixing loads on top of what the cows ate and doesn't show what's in each premix, so it can't be used. Export the TapFeed Load report (CSV) instead.");
@@ -245,8 +285,8 @@ function processReport(fileName, content, XLSX){
 const uploadRows = data => data.after.map(r => [r.code, "", "", +r.dm.toFixed(3), "Dry Matter", "Lactating"]);
 const outputName = fileName => "UpLook_Ingredient_Upload_" + fileName.replace(/\.(csv|xlsx?)$/i, "");
 
-const api = { NON_PEN, PREMIX_CODES, HEADERS, NOP_IN_BOVAER, DOSE_TARGET, UserError, parseCSV, toRecords, rowsToRecords,
-              loadReportToRecords, toTons, daysInRange, build, processReport, uploadRows, outputName };
+const api = { NON_PEN, PREMIX_CODES, HEADERS, NOP_IN_BOVAER, DOSE_TARGET, LABEL_MIN, LABEL_MAX, UserError, parseCSV, toRecords, rowsToRecords,
+              loadReportToRecords, toTons, daysInRange, build, calculatorInputs, processReport, uploadRows, outputName };
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 else root.TMRCore = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

@@ -3,7 +3,7 @@
 "use strict";
 const { HEADERS, UserError, processReport, uploadRows, outputName } = window.TMRCore;
 
-let lastRows = null, lastName = "uplook_ingredient_usage";
+let lastRows = null, lastName = "uplook_ingredient_usage", lastData = null, lastInfo = null;
 
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -111,6 +111,8 @@ function show(data, info, fileName){
       + (data.missing.length ? `<span class="sub">This is from the missing premix recipe below.</span>` : ``); }
 
   lastRows = uploadRows(data);
+  lastData = data; lastInfo = info;
+  $("dl-pdf").classList.toggle("hidden", !data.calculator);
 }
 
 function renderTable(id, rows, total){
@@ -166,6 +168,8 @@ fileInput.onchange = e => { if(e.target.files[0]) handleFile(e.target.files[0]);
 ["dragleave","drop"].forEach(ev=> drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.remove("border-brand","bg-brand/5");}));
 drop.addEventListener("drop", e=>{ if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
 
+const downloadPdf = () => { if (lastData) window.TMRPdf.download(lastData, lastInfo, lastName); };
+
 $("dl-xlsx").onclick = ()=>{
   if(!lastRows) return;
   const ws = XLSX.utils.aoa_to_sheet([HEADERS, ...lastRows]);
@@ -173,6 +177,7 @@ $("dl-xlsx").onclick = ()=>{
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
   XLSX.writeFile(wb, lastName+".xlsx");
+  downloadPdf();
 };
 $("dl-csv").onclick = ()=>{
   if(!lastRows) return;
@@ -180,5 +185,7 @@ $("dl-csv").onclick = ()=>{
   const csv = [HEADERS, ...lastRows].map(r=>r.map(cell).join(",")).join("\r\n");
   const blob = new Blob([csv], {type:"text/csv"});
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = lastName+".csv"; a.click();
+  downloadPdf();
 };
+$("dl-pdf").onclick = downloadPdf;
 })();

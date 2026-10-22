@@ -9,6 +9,11 @@ page warns instead of guessing. The page also shows the Bovaer dose (mg 3-NOP pe
 matter, target 60), calculated from Bovaer as fed × 10% ÷ dry matter eaten. Everything runs
 in the browser, so no feed data leaves the page.
 
+Downloading the UpLook sheet also downloads a **Bovaer Dose Confirmation Report (PDF)** in the same
+layout as the Bovaer Dose Calculator (COM-BCAL). Each premix is a "Bovaer in Blend, nested in premix"
+source, all as-fed, with the nested % set so the calculator math reproduces the dose above exactly.
+Typing those inputs into the calculator gives the same dose.
+
 Live: https://pluceyelancoah.github.io/tmr-uplook-builder/ (GitHub Pages, `main` branch, repo root).
 **Pushing to `main` deploys straight away.**
 
@@ -23,8 +28,10 @@ Live: https://pluceyelancoah.github.io/tmr-uplook-builder/ (GitHub Pages, `main`
 - `index.html`: markup only
 - `js/core.js`: parsing and calculation, no DOM (also used by the tests)
 - `js/app.js`: page wiring and rendering
+- `js/pdf.js`: dose report PDF, ported from COM-BCAL `src/web/src/utils/pdf-export.ts`
+- `js/logo.js`: Bovaer logo as a data URL (the page CSP blocks fetching images for the PDF)
 - `css/input.css` → `css/app.css`: Tailwind source → built output (committed)
-- `vendor/xlsx.full.min.js`: SheetJS, copied from `node_modules` (committed)
+- `vendor/xlsx.full.min.js`, `vendor/jspdf.umd.min.js`: SheetJS and jsPDF, copied from `node_modules` (committed)
 
 ## Develop
 ```powershell

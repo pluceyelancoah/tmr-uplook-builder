@@ -10,7 +10,10 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link href="css/app.css" rel="stylesheet">
 <script src="vendor/xlsx.full.min.js" defer></script>
+<script src="vendor/jspdf.umd.min.js" defer></script>
 <script src="js/core.js" defer></script>
+<script src="js/logo.js" defer></script>
+<script src="js/pdf.js" defer></script>
 <script src="js/app.js" defer></script>
 </head>
 <body class="bg-background text-foreground antialiased">
@@ -137,8 +140,10 @@
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
           <span id="dl-label">Download for UpLook (.xlsx)</span></button>
         <button id="dl-csv" class="text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 rounded">or download as CSV</button>
+        <button id="dl-pdf" class="hidden text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 rounded">dose report only (PDF)</button>
       </div>
       <p class="text-[13px] text-muted-foreground">Saves to your Downloads folder, then upload it to UpLook yourself.
+        The <b>Bovaer dose report (PDF)</b>, in the same format as the Bovaer Dose Calculator, downloads with it.
         Only <b>Tons/Month</b> is filled — UpLook takes one unit and your feed is in tons.</p>
     </section>
 

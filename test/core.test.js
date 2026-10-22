@@ -49,6 +49,22 @@ test("Load report: premixes and BOVAR broken out, totals reconcile, dose on as-f
   close(data.dose.mgPerKg, 1000, "dose");
 });
 
+test("Load report: Bovaer Dose Calculator inputs reproduce the dose", () => {
+  const { data, info } = C.processReport("Load_report.csv", LOAD_REPORT, XLSX);
+  assert.equal(info.farm, "TEST DAIRY");
+  const calc = data.calculator, [s] = calc.sources;
+  assert.equal(calc.sources.length, 1);
+  assert.equal(s.code, "PREMIX");
+  close(s.inclusionPct, 100 / 1100 * 100, "Bovaer % of BOVAR, as fed");
+  close(s.quantityLb, 500 / (1000 / 1150), "PREMIX fed, as fed lb");
+  close(s.bovaerLb, 20, "Bovaer lb");
+  close(calc.totalFeedLbDM, 2000, "total feed lb DM");
+  // Calculator math: lb x 0.4536 kg x (100,000 mg/kg x inclusion% x nested%) / kg DM
+  const mg = s.quantityLb * 0.45359237 * 100000 * s.inclusionPct / 100 * s.nestedPct / 100;
+  assert.ok(Math.abs(mg / calc.totalFeedKgDM - data.dose.mgPerKg) < 1e-6, "calculator dose = parser dose");
+  close(calc.mgPerKg, data.dose.mgPerKg, "calc mg/kg");
+});
+
 test("Load report: no BOVAR batches -> BOVAR flagged as missing, no dose", () => {
   const noBovar = LOAD_REPORT.split("\r\n").filter(l => !l.startsWith("b1,")).join("\r\n");
   const { data } = C.processReport("Load_report.csv", noBovar, XLSX);
