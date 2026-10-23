@@ -20,7 +20,7 @@ Live: https://pluceyelancoah.github.io/tmr-uplook-builder/ (GitHub Pages, `main`
 ## Supported reports
 | Report | Format | Notes |
 |---|---|---|
-| **TapFeed Load report** | CSV | Preferred. Rations that contain PREMIX/2PRMIX count as milking cows. A month with no BOVAR batch made in it can't be broken out. |
+| **TapFeed Load report** | CSV | Preferred. Rations that contain PREMIX/2PRMIX count as milking cows. Worked batch by batch: each BOVAR batch's recipe applies until the next one is made, and premix batches are fed out first-in, first-out. If the export starts before the month (ideally at the last BOVAR batch before it), only the last month is counted and earlier rows are batch history; otherwise premix mixed before the month's first BOVAR batch borrows that batch's recipe, with a note. |
 | TMR Tracker ingredient report (older) | Excel or derived CSV | Only works if the export includes the BOVAR batch section. Outside that section, the code `Bovaer` means the BOVAR blend. |
 | TapFeed Ingredient/Premix Usage | CSV | Rejected: it double counts the premix mixing loads and doesn't show what's in each premix. |
 

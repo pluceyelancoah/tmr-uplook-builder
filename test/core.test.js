@@ -56,13 +56,56 @@ test("Load report: Bovaer Dose Calculator inputs reproduce the dose", () => {
   assert.equal(calc.sources.length, 1);
   assert.equal(s.code, "PREMIX");
   close(s.inclusionPct, 100 / 1100 * 100, "Bovaer % of BOVAR, as fed");
-  close(s.quantityLb, 500 / (1000 / 1150), "PREMIX fed, as fed lb");
+  close(s.quantityLb, 570, "PREMIX loaded into rations, as fed lb");
   close(s.bovaerLb, 20, "Bovaer lb");
   close(calc.totalFeedLbDM, 2000, "total feed lb DM");
   // Calculator math: lb x 0.4536 kg x (100,000 mg/kg x inclusion% x nested%) / kg DM
   const mg = s.quantityLb * 0.45359237 * 100000 * s.inclusionPct / 100 * s.nestedPct / 100;
   assert.ok(Math.abs(mg / calc.totalFeedKgDM - data.dose.mgPerKg) < 1e-6, "calculator dose = parser dose");
   close(calc.mgPerKg, data.dose.mgPerKg, "calc mg/kg");
+});
+
+// Export started early (Aug 20) to pick up the BOVAR batch in use on Sep 1. BOVAR A = 10% Bovaer DM, B = 20%.
+const HEAD = "BatchId,Recipe,BaseBatchId,Ingredient,Pen,Load/Delivery date and time,Actual call weight,Dry call weight,Actual weight,Dry weight,Error amount,Error %,Planned cost,Cost,Cost error,Operator";
+const row = (id, recipe, ing, ts, act, dry) => `${id},${recipe},,${ing},,${ts},0,0,${act},${dry},0,0,0,0,0,A`;
+const CARRY = ["# Farm: TEST DAIRY", HEAD,
+  row("a", "Bovaer Premix (BOVAR)", "GROUND CORN (GRDCRN)", "2026-08-20 08:00:00", 1000, 900),
+  row("a", "Bovaer Premix (BOVAR)", "Bovaer (Bovaer)", "2026-08-20 08:01:00", 100, 100),
+  row("p1", "Premix MILK COWS (PREMIX)", "CANOLA (CANOLA)", "2026-08-21 08:00:00", 1100, 1000),
+  row("p1", "Premix MILK COWS (PREMIX)", "Bovaer Premix (BOVAR)", "2026-08-21 08:01:00", 1100, 1000),
+  row("h0", "HIGH COW (HIGCOW)", "Premix MILK COWS (PREMIX)", "2026-08-25 08:00:00", 1100, 1000),
+  row("h1", "HIGH COW (HIGCOW)", "Premix MILK COWS (PREMIX)", "2026-09-05 08:00:00", 1100, 1000),
+  row("h1", "HIGH COW (HIGCOW)", "Corn silage 2025 (CORSL)", "2026-09-05 08:01:00", 3000, 1000),
+  row("b", "Bovaer Premix (BOVAR)", "GROUND CORN (GRDCRN)", "2026-09-10 08:00:00", 900, 800),
+  row("b", "Bovaer Premix (BOVAR)", "Bovaer (Bovaer)", "2026-09-10 08:01:00", 200, 200),
+  row("p2", "Premix MILK COWS (PREMIX)", "CANOLA (CANOLA)", "2026-09-11 08:00:00", 1100, 1000),
+  row("p2", "Premix MILK COWS (PREMIX)", "Bovaer Premix (BOVAR)", "2026-09-11 08:01:00", 1100, 1000),
+  row("h2", "HIGH COW (HIGCOW)", "Premix MILK COWS (PREMIX)", "2026-09-15 08:00:00", 1100, 1000),
+  row("h2", "HIGH COW (HIGCOW)", "Corn silage 2025 (CORSL)", "2026-09-15 08:01:00", 3000, 1000),
+].join("\r\n");
+
+test("Load report: BOVAR batch carried forward, premix fed first-in first-out, only the last month counted", () => {
+  const { data, info } = C.processReport("Load_report.csv", CARRY, XLSX);
+  assert.equal(data.dateRange, "From 9/1/2026 until 9/15/2026");
+  close(data.herdDM, 2, "herd DM t (Aug 25 load is history only)");
+  // Sep 5 eats the rest of P1 (made with BOVAR A: 500 lb x 10% = 50 lb Bovaer); Sep 15 eats P2 (BOVAR B: 500 x 20% = 100)
+  close(data.dose.bovaerAsFed, 0.075, "Bovaer as fed t");
+  close(data.dose.mgPerKg, 0.075 * 0.1 / 2 * 1e6, "dose");
+  const t = byCode(data);
+  close(t.Bovaer, 0.075, "Bovaer DM"); close(t.GRDCRN, 0.425, "GRDCRN"); close(t.CANOLA, 0.5, "CANOLA");
+  close(data.afterTotal, data.herdDM, "after = herd");
+  assert.match(info.notes.join(" "), /Counted 9\/1\/2026/);
+  const s = data.calculator.sources[0];
+  close(s.quantityLb, 2200, "PREMIX as fed");
+  close(s.inclusionPct, 150 / 1100 * 100, "Bovaer % of BOVAR fed");
+  close(data.calculator.mgPerKg, data.dose.mgPerKg, "calculator dose");
+});
+
+test("Load report: premix mixed before the month's first BOVAR batch borrows it, with a note", () => {
+  const early = LOAD_REPORT.replace(/2026-09-01 08:0/g, "2026-09-02 10:0");
+  const { data, info } = C.processReport("Load_report.csv", early, XLSX);
+  close(data.dose.mgPerKg, 1000, "dose");
+  assert.match(info.notes.join(" "), /mixed before the first Bovaer premix batch/);
 });
 
 test("Load report: no BOVAR batches -> BOVAR flagged as missing, no dose", () => {

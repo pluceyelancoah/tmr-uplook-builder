@@ -67,6 +67,10 @@ function show(data, info, fileName){
       + `Re-export the report so it includes that premix's batches before uploading to UpLook.</span>`;
   } else miss.classList.add("hidden");
 
+  const notes = $("notes"), nl = info.notes || [];
+  notes.innerHTML = nl.map(t => `<p>${esc(t)}</p>`).join("");
+  notes.classList.toggle("hidden", !nl.length);
+
   // premix breakdowns
   const pm = $("premixes"); pm.innerHTML="";
   if(!data.premixes.length) pm.innerHTML = '<p class="text-sm text-muted-foreground">No premixes were fed to the herd this period.</p>';
