@@ -1,9 +1,10 @@
 /* Page wiring: reads the dropped file, renders the summary and working, builds the UpLook download. */
 (function () {
 "use strict";
-const { HEADERS, UserError, processReport, uploadRows, outputName } = window.TMRCore;
+const { HEADERS, UserError, analyze, uploadRows, outputName } = window.TMRCore;
 
 let lastRows = null, lastName = "uplook_ingredient_usage", lastData = null, lastInfo = null;
+const files = [];   // {name, content}: text for CSV, ArrayBuffer for Excel, text lines for PDF
 
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -30,23 +31,29 @@ function show(data, info, fileName){
   $("result").classList.remove("hidden");
   $("error").classList.add("hidden");
   $("r-file").textContent = fileName;
-  $("r-period").textContent = `${info.source} · ${period(data.dateRange, data.days)}`;
+  $("r-period").textContent = `${info.source} · ${data.dateRange ? period(data.dateRange, data.days) : "period not shown in the report"}`;
   $("after-count").textContent = `· ${data.after.length} feeds`;
 
   const d = data.dose;
   $("source").innerHTML = (info.included
-    ? `<p><b>Milking-cow rations included</b> (they contain PREMIX or 2PRMIX): ${info.included.map(esc).join(", ")}.</p>`
+    ? `<p><b>Milking-cow ${data.dateRange ? "rations" : "pens"} included</b> (fed a premix that carries Bovaer): ${info.included.map(esc).join(", ")}.</p>`
       + (info.excluded.length ? `<p><b>Not included:</b> ${info.excluded.map(esc).join(", ")}.</p>` : "")
     : "")
-    + (d ? `<p><b>Dose:</b> ${fmt(d.bovaerAsFed*2000,1)} lb Bovaer as fed (${fmt(d.bovaerDmPct,0)}% DM in the report) × 10% 3-NOP `
-      + `÷ ${fmt(data.herdDM*2000,0)} lb dry matter eaten = ${fmt(d.mgPerKg,1)} mg/kg.</p>` : "");
+    + (d ? `<p><b>Dose:</b> ${fmt(d.bovaerAsFed*2000,1)} lb Bovaer as fed`
+      + (d.bovaerDmPct ? ` (${fmt(d.bovaerDmPct,0)}% DM in the report)` : ` (from the Premixes recipe)`) + ` × 10% 3-NOP `
+      + `÷ ${fmt(data.herdDM*2000,0)} lb dry matter = ${fmt(d.mgPerKg,1)} mg/kg.</p>` : "")
+    + (d && d.intended ? `<p><b>Recipe (intended) dose:</b> the same feeding with each batch's recipe call instead of what was loaded: `
+      + `${fmt(d.intended.bovaerAsFed*2000,1)} lb Bovaer = ${fmt(d.intended.mgPerKg,1)} mg/kg.</p>` : "")
+    + (info.crossCheck ? `<p><b>Cross-check:</b> ${esc(info.crossCheck.label)} ${fmt(info.crossCheck.mgPerKg,1)} mg/kg.</p>` : "");
 
   const rd = $("r-dose"), rds = $("r-dose-sub");
+  $("r-dose-label").textContent = d && d.basis === "intended" ? "Bovaer dose (recipe, intended)" : "Bovaer dose";
   if (d){
     const ok = d.mgPerKg >= d.target;
     rd.textContent = fmt(d.mgPerKg,1);
     rd.className = "text-3xl font-semibold tnum " + (ok ? "text-success" : "text-danger");
-    rds.textContent = `${ok ? "At or above" : "Below"} target of ${d.target} · ${fmt(d.mgPerKg/d.target*100,0)}% of target`;
+    rds.textContent = `${ok ? "At or above" : "Below"} target of ${d.target} · ${fmt(d.mgPerKg/d.target*100,0)}% of target`
+      + (d.intended ? ` · recipe (intended): ${fmt(d.intended.mgPerKg,1)}` : "");
   } else {
     rd.textContent = "—"; rd.className = "text-3xl font-semibold tnum";
     rds.textContent = data.missing.length ? "Can't calculate: premix batches missing" : "No Bovaer in this report";
@@ -84,7 +91,7 @@ function show(data, info, fileName){
         <td class="py-1.5 text-right tnum">${fmt(r.fedDM,3)}</td></tr>`).join("");
     card.innerHTML = `<div class="flex flex-wrap items-baseline justify-between gap-x-4">
         <h4 class="font-semibold text-brand">${esc(p.code)}</h4>
-        <span class="text-[13px] text-muted-foreground">${fmt(p.fedDM,2)} t DM fed · ${fmt(p.batchDM,2)} t DM mixed this period</span></div>
+        <span class="text-[13px] text-muted-foreground">${fmt(p.fedDM,2)} t DM fed${p.batchDM ? ` · ${fmt(p.batchDM,2)} t DM mixed this period` : ""}</span></div>
       <div class="overflow-x-auto"><table class="w-full text-sm mt-2"><thead><tr class="text-muted-foreground text-xs uppercase tracking-wide">
         <th class="text-left font-medium pb-1">Ingredient</th><th class="text-left font-medium pb-1">Report name</th>
         <th class="text-right font-medium pb-1">% of mix</th><th class="text-right font-medium pb-1">Tons fed (DM)</th>
@@ -146,31 +153,83 @@ function fail(msg, detail){
   $("error-detail").textContent = detail ? ("If this keeps happening, send this to Elanco: " + detail) : "";
 }
 
-function handleFile(file){
-  $("drop-title").textContent = file.name;
-  $("drop-sub").textContent = "Drop or click to choose a different file";
-  const isCsv = file.name.toLowerCase().endsWith(".csv");
-  const rd = new FileReader();
-  rd.onload = e => {
-    try{
-      const { data, info } = processReport(file.name, e.target.result, window.XLSX);
-      lastName = outputName(file.name);
-      show(data, info, file.name);
-    }catch(err){
-      if (err instanceof UserError) fail(err.message);
-      else fail("Something went wrong reading that file. Please re-export it and try again.", err.message);
-    }
-  };
-  if(isCsv) rd.readAsText(file); else rd.readAsArrayBuffer(file);
+/* ---------- PDF text (pdf.js is only loaded when a PDF is added) ---------- */
+let pdfjs = null;
+const loadScript = src => new Promise((ok, bad) => { const s = document.createElement("script"); s.src = src;
+  s.onload = ok; s.onerror = () => bad(new Error("Couldn't load " + src)); document.head.appendChild(s); });
+// The worker script loaded first runs pdf.js on the page itself, which also works when the page is opened as a file.
+const pdfLib = () => pdfjs = pdfjs || loadScript("vendor/pdf.worker.min.js").then(() => loadScript("vendor/pdf.min.js")).then(() => window.pdfjsLib);
+
+async function pdfLines(buffer){
+  const lib = await pdfLib(), doc = await lib.getDocument({ data: new Uint8Array(buffer) }).promise, lines = [];
+  for (let p = 1; p <= doc.numPages; p++){
+    const items = (await (await doc.getPage(p)).getTextContent()).items.filter(i => i.str.trim()), rows = new Map();
+    items.forEach(i => { const y = Math.round(i.transform[5]); (rows.get(y) || rows.set(y, []).get(y)).push(i); });
+    [...rows.entries()].sort((a, b) => b[0] - a[0])
+      .forEach(([, r]) => lines.push(r.sort((a, b) => a.transform[4] - b.transform[4]).map(i => i.str.trim()).join(" ")));
+  }
+  return lines;
 }
+
+const readFile = file => new Promise((ok, bad) => {
+  const rd = new FileReader(), lower = file.name.toLowerCase();
+  rd.onerror = () => bad(rd.error);
+  rd.onload = () => lower.endsWith(".pdf") ? pdfLines(rd.result).then(ok, bad) : ok(rd.result);
+  if (lower.endsWith(".csv")) rd.readAsText(file); else rd.readAsArrayBuffer(file);
+});
+
+const STATUS = { "used": ["✓", "text-success"], "needs another file": ["…", "text-amber-600"],
+                 "not needed": ["–", "text-muted-foreground"], "unusable": ["✕", "text-danger"] };
+
+function renderFiles(a){
+  const box = $("files");
+  box.classList.toggle("hidden", !files.length);
+  $("file-list").innerHTML = a.files.map(f => { const [icon, cls] = STATUS[f.status];
+    return `<li class="flex gap-3 items-baseline"><span class="${cls} font-semibold w-4">${icon}</span>`
+      + `<span class="min-w-0"><span class="font-medium">${esc(f.label)}</span> <span class="text-muted-foreground break-all">· ${esc(f.name)}</span>`
+      + `<span class="block text-[13px] text-muted-foreground">${esc(f.status === "not needed" && f.kind !== "recipes" ? "Not needed: the Load report already has this" : f.role)}</span></span></li>`; }).join("");
+  $("guidance").innerHTML = a.guidance.map(g => `<p>→ ${esc(g)}</p>`).join("");
+  $("guidance").classList.toggle("hidden", !a.guidance.length);
+}
+
+function run(){
+  try{
+    const a = analyze(files, window.XLSX);
+    renderFiles(a);
+    if (!a.result){ $("result").classList.add("hidden"); $("error").classList.add("hidden"); return; }
+    const main = a.files.find(f => f.status === "used");
+    lastName = outputName(main.name);
+    show(a.result.data, a.result.info, a.files.filter(f => f.status === "used").map(f => f.name).join(" + "));
+  }catch(err){
+    if (err instanceof UserError) fail(err.message);
+    else fail("Something went wrong reading those files. Please re-export them and try again.", err.message);
+  }
+}
+
+async function handleFiles(list){
+  $("drop-title").textContent = "Reading…";
+  for (const file of list){
+    try{
+      const content = await readFile(file), i = files.findIndex(f => f.name === file.name);
+      if (i >= 0) files[i] = { name:file.name, content }; else files.push({ name:file.name, content });
+    }catch(err){ fail(`Couldn't read ${file.name}. Please re-export it and try again.`, err.message); }
+  }
+  $("drop-title").textContent = files.length > 1 ? `${files.length} files added` : (files[0] || {}).name || "Drop your TapFeed Load report here";
+  $("drop-sub").textContent = "Drop or click to add more files";
+  run();
+}
+
+$("clear-files").onclick = () => { files.length = 0; lastRows = lastData = null;
+  $("files").classList.add("hidden"); $("result").classList.add("hidden"); $("error").classList.add("hidden");
+  $("drop-title").textContent = "Drop your TapFeed Load report here"; $("drop-sub").textContent = "or click to choose it"; };
 
 const drop = $("drop"), fileInput = $("file");
 drop.onclick = ()=> fileInput.click();
 drop.addEventListener("keydown", e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); fileInput.click(); }});
-fileInput.onchange = e => { if(e.target.files[0]) handleFile(e.target.files[0]); fileInput.value = ""; };
+fileInput.onchange = e => { if(e.target.files.length) handleFiles([...e.target.files]); fileInput.value = ""; };
 ["dragover","dragenter"].forEach(ev=> drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.add("border-brand","bg-brand/5");}));
 ["dragleave","drop"].forEach(ev=> drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.remove("border-brand","bg-brand/5");}));
-drop.addEventListener("drop", e=>{ if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+drop.addEventListener("drop", e=>{ if(e.dataTransfer.files.length) handleFiles([...e.dataTransfer.files]); });
 
 const downloadPdf = () => { if (lastData) window.TMRPdf.download(lastData, lastInfo, lastName); };
 

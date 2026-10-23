@@ -18,11 +18,16 @@ Live: https://pluceyelancoah.github.io/tmr-uplook-builder/ (GitHub Pages, `main`
 **Pushing to `main` deploys straight away.**
 
 ## Supported reports
+Several files can be dropped at once. Each is identified, marked used / needs another file / not needed / can't be used,
+and the page says what to add. Priority: Load report > TMR Tracker report > Ingredient usage + Premixes.
+
 | Report | Format | Notes |
 |---|---|---|
-| **TapFeed Load report** | CSV | Preferred. Rations that contain PREMIX/2PRMIX count as milking cows. Worked batch by batch: each BOVAR batch's recipe applies until the next one is made, and premix batches are fed out first-in, first-out. If the export starts before the month (ideally at the last BOVAR batch before it), only the last month is counted and earlier rows are batch history; otherwise premix mixed before the month's first BOVAR batch borrows that batch's recipe, with a note. |
+| **TapFeed Load report** | CSV | Preferred, the only file needed; unfiltered is fine. Rations that contain PREMIX/2PRMIX count as milking cows. Worked batch by batch: each BOVAR batch's recipe applies until the next one is made, and premix batches are fed out first-in, first-out. Export from the 1st of the previous month: only the last month is counted and earlier rows are batch history; otherwise premix mixed before the month's first BOVAR batch borrows that batch's recipe, with a note. Also gives the recipe (intended) dose from the batch call weights. |
+| TapFeed Ingredient usage + Premixes | CSV + PDF | Together only: recipe (intended) dose from what each pen was fed and the Premixes recipe. Used as a cross-check when a Load report is also given. The usage report has no date range. |
 | TMR Tracker ingredient report (older) | Excel or derived CSV | Only works if the export includes the BOVAR batch section. Outside that section, the code `Bovaer` means the BOVAR blend. |
-| TapFeed Ingredient/Premix Usage | CSV | Rejected: it double counts the premix mixing loads and doesn't show what's in each premix. |
+| TapFeed Ingredient/Premix Usage | CSV | Can't be used: it double counts the premix mixing loads and doesn't show what's in each premix. |
+| TapFeed Recipes | PDF | Not needed. |
 
 ## Layout
 - `index.html`: markup only
@@ -32,6 +37,8 @@ Live: https://pluceyelancoah.github.io/tmr-uplook-builder/ (GitHub Pages, `main`
 - `js/logo.js`: Bovaer logo as a data URL (the page CSP blocks fetching images for the PDF)
 - `css/input.css` → `css/app.css`: Tailwind source → built output (committed)
 - `vendor/xlsx.full.min.js`, `vendor/jspdf.umd.min.js`: SheetJS and jsPDF, copied from `node_modules` (committed)
+- `vendor/pdf.min.js`, `vendor/pdf.worker.min.js`: pdf.js 3.x, loaded only when a PDF is added; the worker script runs on the page (no Worker), so it works from `file://` and under the CSP
+- `test/pdf-lines.js`: prints the text lines pdf.js extracts from a PDF (for working on the Premixes parser)
 
 ## Develop
 ```powershell

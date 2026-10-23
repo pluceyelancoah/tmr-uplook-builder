@@ -99,6 +99,7 @@ function fromLoadReport(grid){
   const lbs = v => parseFloat(S(v).replace(/,/g,"")) || 0;   // Load report weights are in pounds
 
   const byId = new Map(), names = {}; let first = "", last = "";
+  const cCall = head.indexOf("Actual call weight");
   for (const r of grid.slice(1)){
     if (r.length < head.length/2) continue;
     const ts = S(r[cDate]), d = ts.slice(0,10);
@@ -109,8 +110,8 @@ function fromLoadReport(grid){
     let b = byId.get(S(r[cBatch]));
     if (!b){ b = {recipe:rc, time:ts, ing:{}}; byId.set(S(r[cBatch]), b); }
     if (ts && ts < b.time) b.time = ts;
-    const x = b.ing[ing] = b.ing[ing] || {act:0, dry:0};
-    x.act += lbs(r[cAct]); x.dry += lbs(r[cDry]);
+    const x = b.ing[ing] = b.ing[ing] || {act:0, dry:0, call:0};
+    x.act += lbs(r[cAct]); x.dry += lbs(r[cDry]); x.call += lbs(r[cCall]);
   }
   const batches = [...byId.values()].sort((a,b) => a.time < b.time ? -1 : a.time > b.time ? 1 : 0);
   const sum = (o, k) => Object.values(o).reduce((a,x) => a + (k ? x[k] : x), 0);
@@ -124,14 +125,15 @@ function fromLoadReport(grid){
 
   const monthStart = last.slice(0,8) + "01", start = first < monthStart ? monthStart : first;
   const made = code => batches.filter(b => b.recipe === code && sum(b.ing, "dry") > 0);
-  const bovarRecipe = b => { const dm = sum(b.ing, "dry"), bov = b.ing.Bovaer || {act:0, dry:0};
+  const bovarRecipe = b => { const dm = sum(b.ing, "dry"), bov = b.ing.Bovaer || {act:0, dry:0, call:0}, call = sum(b.ing, "call");
     return { time:b.time, dmFrac: dm / sum(b.ing, "act"), bovaerAfPerDm: bov.dry > 0 ? bov.act / bov.dry : 0,
+             callShare: call > 0 ? bov.call / call : 0,
              share: Object.fromEntries(Object.entries(b.ing).map(([i,x]) => [i, x.dry / dm])) }; };
   const bovarMade = made("BOVAR"), firstBovar = bovarMade.length ? bovarRecipe(bovarMade[0]) : null;
   const premixMade = Object.fromEntries(PREMIX_CODES.map(p => [p, made(p)]));
 
   const before = {}, after = {}, card = {BOVAR:{}}, missing = {}, early = {}, notes = [];
-  const src = {}; let herd = 0, bovar = null, borrowed = 0;
+  const src = {}; let herd = 0, bovar = null, borrowed = 0, intendedAF = 0;
   const add = (o, k, v) => o[k] = (o[k] || 0) + v;
   const source = code => src[code] = src[code] || {quantityLb:0, bovarAF:0, bovaerAF:0, bovaerDM:0};
 
@@ -144,7 +146,8 @@ function fromLoadReport(grid){
     s.bovaerAF += dm * (recipe.share.Bovaer || 0) * recipe.bovaerAfPerDm;
   };
   const queue = Object.fromEntries(PREMIX_CODES.map(p => [p, []])), lastMix = {};
-  const feedPremix = (p, dm, counted) => {
+  // afPerDm: as-fed lb per lb DM of this premix as loaded into the ration, for the recipe (intended) dose.
+  const feedPremix = (p, dm, counted, afPerDm) => {
     if (!premixMade[p].length){ if (counted) add(missing, p, dm); return; }
     while (dm > 1e-9){
       let mix = queue[p][0], take = dm;
@@ -154,13 +157,15 @@ function fromLoadReport(grid){
         card[p] = card[p] || {};
         Object.entries(mix.share).forEach(([i, sh]) => { add(card[p], i, take * sh); if (i !== "BOVAR") add(after, i, take * sh); });
         if (mix.share.BOVAR) feedBovar(take * mix.share.BOVAR, mix.bovar, source(p));
+        if (mix.bovar) intendedAF += take * afPerDm * mix.bovarCallShare * mix.bovar.callShare;
       }
       if (queue[p][0]){ mix.left -= take; if (mix.left <= 1e-9) queue[p].shift(); }
       dm -= take;
     }
   };
-  const premixRecipe = b => { const dm = sum(b.ing, "dry");
+  const premixRecipe = b => { const dm = sum(b.ing, "dry"), call = sum(b.ing, "call");
     return { left: dm, share: Object.fromEntries(Object.entries(b.ing).map(([i,x]) => [i, x.dry / dm])),
+             bovarCallShare: b.ing.BOVAR && call > 0 ? b.ing.BOVAR.call / call : 0,
              bovar: b.ing.BOVAR ? (bovar || firstBovar) : null }; };
 
   for (const b of batches){
@@ -175,14 +180,14 @@ function fromLoadReport(grid){
     if (!lactating.includes(b.recipe)) continue;
     for (const [i, x] of Object.entries(b.ing)){
       if (counted){ add(before, i, x.dry); herd += x.dry; }
-      if (PREMIX_CODES.includes(i)){ if (counted) source(i).quantityLb += x.act; feedPremix(i, x.dry, counted); }
-      else if (i === "BOVAR"){ if (counted) feedBovar(x.dry, bovar || firstBovar, source("BOVAR")); }
+      if (PREMIX_CODES.includes(i)){ if (counted) source(i).quantityLb += x.act; feedPremix(i, x.dry, counted, x.dry > 0 ? x.act / x.dry : 0); }
+      else if (i === "BOVAR"){ if (counted){ const rcp = bovar || firstBovar; feedBovar(x.dry, rcp, source("BOVAR")); if (rcp) intendedAF += x.act * rcp.callShare; } }
       else if (counted) add(after, i, x.dry);
     }
   }
 
   if (start > first) notes.push(`Counted ${usDate(start)} – ${usDate(last)}. Rows from ${usDate(first)} were used only as batch history (premix and Bovaer premix carried into the month).`);
-  if (borrowed && firstBovar) notes.push(`${borrowed} premix batch${borrowed > 1 ? "es were" : " was"} mixed before the first Bovaer premix batch in this file (${usDate(firstBovar.time.slice(0,10))}) and given that batch's recipe. For exact numbers, export from the last Bovaer premix batch before the month.`);
+  if (borrowed && firstBovar) notes.push(`${borrowed} premix batch${borrowed > 1 ? "es were" : " was"} mixed before the first Bovaer premix batch in this file (${usDate(firstBovar.time.slice(0,10))}) and given that batch's recipe. For exact numbers, export the Load report from the 1st of the previous month.`);
   Object.entries(early).forEach(([p, dm]) => { const fed = before[p] || 0;
     if (fed && dm / fed > 0.01) notes.push(`${(dm/LB_PER_TON).toFixed(1)} t of ${names[p] || p} was fed before its first batch in this file and given the nearest batch's recipe.`); });
 
@@ -197,7 +202,8 @@ function fromLoadReport(grid){
   const missingList = Object.entries(missing).map(([code, dm]) => ({code, dm:T(dm)}));
   const sources = Object.values(src), bovaerAF = sum(sources.map(s => s.bovaerAF)), bovaerDM = sum(sources.map(s => s.bovaerDM));
   const dose = bovaerAF > 0 && herd > 0 && !missingList.length
-    ? { mgPerKg: bovaerAF*NOP_IN_BOVAER/herd*1e6, target: DOSE_TARGET, bovaerAsFed: T(bovaerAF), bovaerDmPct: bovaerDM/bovaerAF*100 } : null;
+    ? { mgPerKg: bovaerAF*NOP_IN_BOVAER/herd*1e6, target: DOSE_TARGET, bovaerAsFed: T(bovaerAF), bovaerDmPct: bovaerDM/bovaerAF*100,
+        basis: "actual", intended: intendedAF > 0 ? { mgPerKg: intendedAF*NOP_IN_BOVAER/herd*1e6, bovaerAsFed: T(intendedAF) } : null } : null;
   const calcSources = dose ? Object.entries(src).filter(([, s]) => s.bovaerAF > 0).map(([code, s]) => {
     const quantityLb = code === "BOVAR" ? s.bovarAF : s.quantityLb, inclusionPct = s.bovaerAF / s.bovarAF * 100;
     return { code, name: names[code] || code, quantityLb, dmPct: null, inclusionPct,
@@ -324,6 +330,188 @@ function calcSummary(sources, herdDMtons){
            labelMin: LABEL_MIN, labelMax: LABEL_MAX };
 }
 
+/* ---------- TapFeed Premixes / Recipes report (PDF, as text lines) ---------- */
+const PMX_HEAD = /^(.*?)\s*(\S+)\s+([\d,]+\.\d+)\s+([\d.]+)%\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*[\u2713\u2717])?$/;
+const PMX_ING = /^(\d+)\s+(.*?)\s+(\S+)\s+([\d.]+)%\s+([\d.]+)\s+([\d.]+)%\s+([\d.]+)\s+([\d.]+)%$/;
+
+// Weights print to 0.01 lb/animal and load % to 0.1%, so each share uses whichever of the two is less rounded.
+function bestShare(part, whole, pct){
+  const byWeight = part > 0 && whole > 0 && 0.005 / part <= 0.05 / Math.max(pct, 1e-9);
+  return byWeight ? part / whole : pct / 100;
+}
+
+function parsePremixes(lines){
+  const top = lines.slice(0, 6).map(l => l.trim());
+  const kind = top.some(l => /^Premixes$/i.test(l)) ? "premixes" : top.some(l => /^Recipes$/i.test(l)) ? "recipes" : null;
+  const generated = ((lines.find(l => /^Generated:/i.test(l.trim())) || "").replace(/^\s*Generated:\s*/i, "").match(/\d{1,2}\/\d{1,2}\/\d{4}/) || [""])[0];
+  const raw = {}; let cur = null;
+  for (const l of lines.map(s => s.trim())){
+    const g = l.match(PMX_ING);
+    if (g && cur){ cur.ings.push({ name:g[2], code:g[3], af:+g[5], afPct:+g[6], dm:+g[7], dmPct:+g[8] }); continue; }
+    const h = l.match(PMX_HEAD);
+    if (h && !/^Recipe\s+Display name/i.test(l)) cur = raw[h[2]] = { code:h[2], name:h[1].trim() || h[2], af:+h[5], dm:+h[6], ings:[] };
+  }
+  const recipes = {};
+  Object.values(raw).forEach(r => {
+    const by = {};
+    r.ings.forEach(i => { const x = by[i.code] = by[i.code] || {name:i.name, af:0, afPct:0, dm:0, dmPct:0};
+      x.af += i.af; x.afPct += i.afPct; x.dm += i.dm; x.dmPct += i.dmPct; });
+    recipes[r.code] = { code:r.code, name:r.name,
+      names: Object.fromEntries(Object.entries(by).map(([c, x]) => [c, x.name])),
+      afShare: Object.fromEntries(Object.entries(by).map(([c, x]) => [c, bestShare(x.af, r.af, x.afPct)])),
+      dmShare: Object.fromEntries(Object.entries(by).map(([c, x]) => [c, bestShare(x.dm, r.dm, x.dmPct)])) };
+  });
+  const bovarCode = (Object.values(recipes).find(r => "Bovaer" in r.afShare) || {}).code || null;
+  const carriers = bovarCode ? Object.values(recipes).filter(r => bovarCode in r.afShare).map(r => r.code) : [];
+  return { kind, generated, recipes, bovarCode, carriers };
+}
+
+/* ---------- TapFeed Ingredient usage report (CSV, per pen, names only, tons) ---------- */
+// Columns are ingredient, pen, head count, actual t, dry t (the header row labels are shifted). No date range in the file.
+// Bovaer intended = premix as fed x Bovaer premix % of the premix x Bovaer % of the Bovaer premix, all from the Premixes recipe.
+function fromUsage(grid, pmx){
+  const S = v => (v===undefined||v===null) ? "" : String(v).trim();
+  const num = v => parseFloat(S(v).replace(/,/g, "")) || 0;
+  const rows = grid.slice(1).filter(r => S(r[1]) && S(r[1]).toUpperCase() !== "TOTAL" && S(r[0]))
+    .map(r => ({ ing:S(r[0]), pen:S(r[1]), heads:num(r[2]), act:num(r[3]), dry:num(r[4]) }));
+  const byName = {}; Object.values(pmx.recipes).forEach(r => byName[r.name.toLowerCase()] = r);
+  const carrierNames = pmx.carriers.map(c => pmx.recipes[c].name.toLowerCase());
+  const pens = [...new Set(rows.map(r => r.pen))];
+  const lactating = pens.filter(p => rows.some(r => r.pen === p && carrierNames.includes(r.ing.toLowerCase())));
+  const excluded = pens.filter(p => !lactating.includes(p));
+
+  const before = {}, after = {}, card = {}, src = {}, notes = [];
+  const add = (o, k, v) => o[k] = (o[k] || 0) + v;
+  const bovar = pmx.recipes[pmx.bovarCode];
+  let herd = 0, heads = 0;
+  const expand = (recipe, dm, into) => Object.entries(recipe.dmShare).forEach(([c, sh]) => {
+    const name = recipe.names[c];
+    if (c === pmx.bovarCode) Object.entries(bovar.dmShare).forEach(([c2, sh2]) => { add(into, bovar.names[c2], dm * sh * sh2); add(card[bovar.name] = card[bovar.name] || {}, bovar.names[c2], dm * sh * sh2); });
+    else add(into, name, dm * sh);
+  });
+  lactating.forEach(p => {
+    const pr = rows.filter(r => r.pen === p);
+    heads += Math.max(...pr.map(r => r.heads));
+    pr.forEach(r => {
+      herd += r.dry; add(before, r.ing, r.dry);
+      const recipe = byName[r.ing.toLowerCase()];
+      if (recipe){
+        card[recipe.name] = card[recipe.name] || {};
+        Object.entries(recipe.dmShare).forEach(([c, sh]) => add(card[recipe.name], recipe.names[c], r.dry * sh));
+        expand(recipe, r.dry, after);
+        if (pmx.carriers.includes(recipe.code)){
+          const s = src[recipe.code] = src[recipe.code] || { quantityLb:0 };
+          s.quantityLb += r.act * LB_PER_TON;
+        }
+      } else add(after, r.ing, r.dry);
+    });
+  });
+
+  const sum = o => Object.values(o).reduce((a, b) => a + b, 0);
+  const list = o => Object.entries(o).filter(([, v]) => v > 0.0005).sort((a, b) => b[1] - a[1]).map(([code, dm]) => ({code, desc:"", dm}));
+  const bovaerShare = bovar ? (bovar.afShare.Bovaer || 0) : 0;
+  const sources = Object.entries(src).map(([code, s]) => {
+    const nested = pmx.recipes[code].afShare[pmx.bovarCode], bovaerLb = s.quantityLb * nested * bovaerShare;
+    return { code, name: pmx.recipes[code].name, quantityLb: s.quantityLb, dmPct: null, inclusionPct: bovaerShare * 100,
+             nestedPct: nested * 100, bovaerLb, nopMg: bovaerLb * NOP_IN_BOVAER * MG_PER_LB };
+  });
+  const bovaerLb = sources.reduce((a, s) => a + s.bovaerLb, 0);
+  const dose = bovaerLb > 0 && herd > 0
+    ? { mgPerKg: bovaerLb / LB_PER_TON * NOP_IN_BOVAER / herd * 1e6, target: DOSE_TARGET, bovaerAsFed: bovaerLb / LB_PER_TON,
+        bovaerDmPct: null, basis: "intended", intended: null } : null;
+  notes.push("Ingredient usage reports don't show their date range. Check the export covered the full month.");
+  notes.push(`Intended dose from the Premixes recipe${pmx.generated ? ` (printed ${pmx.generated})` : ""}: the recipe prints weights to 0.01 lb, so this is accurate to about ±1%. Make sure the recipe was the one in use for the whole period.`);
+  const premixes = Object.entries(card).map(([name, o]) => { const fed = sum(o);
+    return { code:name, fedDM:fed, batchDM:0, rows: Object.entries(o).sort((a, b) => b[1] - a[1]).map(([c, dm]) => ({code:c, desc:"", pct:dm/fed*100, fedDM:dm})) }; });
+  const beforeList = list(before), afterList = list(after), total = l => l.reduce((a, r) => a + r.dm, 0);
+  return {
+    data: { dateRange:"", days:null, totalHeads:heads, herdDM:herd, missing:[], premixes, reportTotal:0, mixingDM:0, dose,
+            calculator: dose ? calcSummary(sources, herd) : null, before:beforeList, after:afterList,
+            beforeTotal: total(beforeList), afterTotal: total(afterList) },
+    included: lactating, excluded, notes };
+}
+
+/* ---------- which file is which ---------- */
+const KINDS = {
+  load:      { label:"TapFeed Load report", role:"Everything needed: actual and recipe (intended) dose" },
+  usage:     { label:"TapFeed Ingredient usage report", role:"What each pen was fed (needs the Premixes report for the dose)" },
+  premixes:  { label:"TapFeed Premixes report", role:"What's in each premix (needs the Ingredient usage report)" },
+  recipes:   { label:"TapFeed Recipes report", role:"Not needed: the Premixes report or Load report is" },
+  summary:   { label:"TapFeed Ingredient/Premix Usage summary", role:"Can't be used: it double counts premix mixing and doesn't show what's in each premix" },
+  tracker:   { label:"TMR Tracker ingredient report", role:"Older report: works if it includes the BOVAR batch section" },
+  loadXlsx:  { label:"Load report in Excel format", role:"Re-export it as CSV" },
+  unknown:   { label:"Not recognised", role:"Not a TapFeed or TMR Tracker report" },
+};
+
+// file: {name, content} where content is a string (CSV), ArrayBuffer/Uint8Array (Excel) or an array of text lines (PDF).
+function identify(file, XLSX){
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".pdf")){
+    const p = parsePremixes(file.content || []);
+    return { kind: p.kind || "unknown", premixes: p };
+  }
+  if (lower.endsWith(".csv")){
+    const all = parseCSV(file.content), grid = all.filter(r => !String(r[0]||"").startsWith("#"));
+    const head = (grid[0] || []).map(h => String(h).trim());
+    const farmLine = all.find(r => /^#\s*Farm:/i.test(String(r[0]||"")));
+    const farm = farmLine ? String(farmLine[0]).replace(/^#\s*Farm:\s*/i, "").trim() : "";
+    if (head.includes("BatchId") && head.includes("Recipe") && head.includes("Dry weight")) return { kind:"load", farm };
+    if (head[0] === "Ingredient" && head.includes("Loaded weight")) return { kind:"summary", farm };
+    if (head.includes("Group") && head.includes("# Animals") && head.includes("Dry weight")) return { kind:"usage", farm, grid };
+    if (head.includes("DryWt_Ton")) return { kind:"tracker" };
+    return { kind:"unknown" };
+  }
+  if (lower.endsWith(".xls") || lower.endsWith(".xlsx")){
+    const wb = XLSX.read(file.content, {type:"array"});
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:""});
+    if (rows.some(r => r.some(c => String(c).trim() === "Load Report"))) return { kind:"loadXlsx" };
+    return { kind: rowsToRecords(rows).length ? "tracker" : "unknown" };
+  }
+  return { kind:"unknown" };
+}
+
+// Picks the best calculation the files allow and says what's missing. Returns {files, result, basis, guidance}.
+function analyze(files, XLSX){
+  const found = files.map(f => Object.assign({ name:f.name }, identify(f, XLSX)));
+  const pick = k => found.find(f => f.kind === k), src = f => files.find(x => x.name === f.name);
+  const load = pick("load"), tracker = pick("tracker"), usage = pick("usage");
+  const pmx = found.find(f => f.kind === "premixes" && f.premixes.carriers.length);
+  const guidance = [];
+  let result = null, basis = null, used = [];
+
+  if (load){
+    result = processReport(load.name, src(load).content, XLSX); basis = "actual"; used = [load.name];
+    if (usage && pmx){
+      const u = fromUsage(usage.grid, pmx.premixes);
+      if (u.data.dose) result.info.crossCheck = { mgPerKg: u.data.dose.mgPerKg,
+        label: "Ingredient usage × Premixes recipe (intended, as delivered). Only comparable if both reports cover the same dates." };
+      used.push(usage.name, pmx.name);
+    }
+  } else if (tracker){
+    result = processReport(tracker.name, src(tracker).content, XLSX); basis = "actual"; used = [tracker.name];
+  } else if (usage && pmx){
+    const u = fromUsage(usage.grid, pmx.premixes);
+    if (!u.included.length) guidance.push(`None of the pens in the Ingredient usage report were fed ${pmx.premixes.carriers.map(c => pmx.premixes.recipes[c].name).join(" or ")}. Check both reports are from the same farm and month.`);
+    else { result = { data:u.data, info:{ source:"Ingredient usage + Premixes report", farm:usage.farm, included:u.included, excluded:u.excluded, notes:u.notes } };
+           basis = "intended"; used = [usage.name, pmx.name]; }
+  }
+
+  if (!result){
+    if (usage && !pmx) guidance.push("Ingredient usage found. To work out the Bovaer dose, also add the Premixes report (PDF) for the same period, or use the Load report instead, which has everything in one file.");
+    if (pick("premixes") && !usage) guidance.push("Premixes report found. Also add the Ingredient usage report (CSV) for the month, or use the Load report instead.");
+    if (pick("premixes") && !pmx) guidance.push("The Premixes report doesn't list a Bovaer premix (no recipe contains Bovaer). Check it's the right farm.");
+    if (!found.length || !guidance.length) guidance.push("Add the TapFeed Load report (CSV). It's the only file you need.");
+  } else if (basis === "intended") {
+    guidance.push("For the actual dose (what was loaded), add the TapFeed Load report.");
+  }
+  found.forEach(f => { f.label = KINDS[f.kind].label; f.role = KINDS[f.kind].role;
+    f.status = used.includes(f.name) ? "used" : ["summary","loadXlsx","unknown"].includes(f.kind) ? "unusable"
+      : !result && ["usage","premixes"].includes(f.kind) ? "needs another file" : "not needed";
+    if (f.status === "used" && f.kind !== "load")
+      f.role = load ? "Used as a cross-check (recipe dose)" : f.kind === "usage" ? "What each pen was fed" : "What's in each premix"; });
+  return { files: found, result, basis, guidance };
+}
+
 /* ---------- entry point: file contents -> result ---------- */
 // The older ingredient report codes the BOVAR blend as "Bovaer" everywhere except inside the BOVAR batch section.
 const legacyBovar = recs => { recs.forEach(r => { if (r.DisplayName === "Bovaer" && r.Pen !== "BOVAR"){
@@ -372,7 +560,8 @@ const uploadRows = data => data.after.map(r => [r.code, "", "", +r.dm.toFixed(3)
 const outputName = fileName => "UpLook_Ingredient_Upload_" + fileName.replace(/\.(csv|xlsx?)$/i, "");
 
 const api = { NON_PEN, PREMIX_CODES, HEADERS, NOP_IN_BOVAER, DOSE_TARGET, LABEL_MIN, LABEL_MAX, UserError, parseCSV, toRecords, rowsToRecords,
-              fromLoadReport, toTons, daysInRange, build, calculatorInputs, processReport, uploadRows, outputName };
+              fromLoadReport, toTons, daysInRange, build, calculatorInputs, processReport, uploadRows, outputName,
+              parsePremixes, fromUsage, identify, analyze, KINDS };
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 else root.TMRCore = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

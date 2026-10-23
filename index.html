@@ -45,12 +45,22 @@
       </svg>
       <p id="drop-title" class="mt-3 text-lg font-medium text-foreground break-all">Drop your TapFeed Load report here</p>
       <p id="drop-sub" class="mt-1 text-sm text-muted-foreground">or click to choose it</p>
-      <input id="file" type="file" accept=".csv,.xls,.xlsx" class="hidden">
+      <input id="file" type="file" accept=".csv,.xls,.xlsx,.pdf" multiple class="hidden">
     </div>
     <p class="mt-4 text-[13px] text-muted-foreground">
-      Export the <b>Load report</b> from <b>TapFeed</b> for the <b>full month</b> as <b>CSV</b>, filtered to the recipes fed to
-      milking cows. The older <b>TMR Tracker</b>
-      monthly ingredient report (CSV or Excel) also works. Runs entirely on your computer — your feed data never leaves this page.</p>
+      <b>Best:</b> the TapFeed <b>Load report</b> as <b>CSV</b>. It's the only file you need, and it doesn't need to be filtered.
+      You can also drop several files at once (for example the Ingredient usage report and the Premixes report); the page says
+      what each one is and what's missing. The older <b>TMR Tracker</b> ingredient report (CSV or Excel) also works.
+      Runs entirely on your computer — your feed data never leaves this page.</p>
+
+    <div id="files" class="hidden mt-4 rounded-lg border border-border bg-muted/20 p-4 text-sm">
+      <div class="flex items-center justify-between gap-4">
+        <h3 class="font-semibold">Your files</h3>
+        <button id="clear-files" class="text-[13px] text-muted-foreground underline underline-offset-2 hover:text-foreground">Clear and start again</button>
+      </div>
+      <ul id="file-list" class="mt-2 space-y-2"></ul>
+      <div id="guidance" class="hidden mt-3 space-y-1 text-[13px] font-medium text-brand"></div>
+    </div>
 
     <details data-acc class="mt-3 text-sm">
       <summary class="flex items-center gap-2 text-muted-foreground hover:text-foreground select-none">
@@ -61,19 +71,18 @@
         <figure>
           <img src="img/tapfeed-1-reports-load-report.png" alt="TapFeed Reports page with the time range and the Load report tile selected"
                class="w-full rounded-md border border-border shadow-sm">
-          <figcaption class="mt-2 text-[13px] text-muted-foreground"><b>1.</b> Open <b>Reports</b>, set the <b>Time range</b> to the
-            full month (e.g. 09/01/2026 – 09/30/2026), select <b>Load report</b> and click <b>Preset</b>.
-            For the most exact dose, start the range on the day the last <b>Bovaer premix</b> batch was made before the month
-            (e.g. 08/14/2026 – 09/30/2026); only the last month is counted.</figcaption>
+          <figcaption class="mt-2 text-[13px] text-muted-foreground"><b>1.</b> Open <b>Reports</b>, set the <b>Time range</b> from the
+            <b>1st of the previous month</b> to the <b>last day of the month you're checking</b> (e.g. 08/01/2026 – 09/30/2026),
+            select <b>Load report</b> and click <b>Preset</b>. Only the last month is counted; the earlier weeks let the page use the
+            Bovaer premix batch that was in use on the 1st. A single month also works, slightly less exactly.</figcaption>
         </figure>
         <figure>
           <img src="img/tapfeed-2-preset-more.png" alt="Preset reports page for a Load report, with the More (three dots) button next to Download"
                class="w-full rounded-md border border-border shadow-sm">
           <figcaption class="mt-2 text-[13px] text-muted-foreground space-y-1.5">
-            <p><b>2.</b> Click <b>More</b> (the three dots next to <b>Download</b>) and choose <b>Edit</b>.</p>
-            <p><b>3.</b> Filter the recipes to <b>every ration fed to the milking-cow pens</b>, plus the <b>premixes</b> those rations use
-              (including the Bovaer premix). The app needs the premix batches to work out what's in them, and it warns you if one is missing.
-              Check the time range is the full month, then save.</p></figcaption>
+            <p><b>2.</b> Optional: click <b>More</b> (the three dots next to <b>Download</b>) and choose <b>Edit</b> to filter the recipes.</p>
+            <p><b>3.</b> If you filter, keep <b>every ration fed to the milking-cow pens</b> plus the <b>premixes</b> those rations use
+              (including the Bovaer premix). An unfiltered report works too: the page picks out the rations that carry Bovaer.</p></figcaption>
         </figure>
         <figure>
           <img src="img/tapfeed-3-download-csv.png" alt="Download report dialog with CSV chosen as the format"
@@ -106,6 +115,22 @@
         </ol>
       </div>
     </details>
+
+    <details data-acc class="mt-2 text-sm">
+      <summary class="flex items-center gap-2 text-muted-foreground hover:text-foreground select-none">
+        <svg class="chev h-4 w-4 transition" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+        Other TapFeed reports: which ones work
+      </summary>
+      <div class="mt-3 rounded-lg border border-border bg-muted/20 p-4 overflow-x-auto">
+        <table class="w-full text-[13px]"><thead><tr class="text-muted-foreground text-left"><th class="pb-1 pr-4 font-medium">Report</th><th class="pb-1 font-medium">Use</th></tr></thead>
+        <tbody>
+          <tr class="border-t border-border"><td class="py-1.5 pr-4 font-medium">Load report (CSV)</td><td class="py-1.5"><b>Best — the only file needed.</b> Actual dose (what was loaded) and recipe (intended) dose.</td></tr>
+          <tr class="border-t border-border"><td class="py-1.5 pr-4 font-medium">Ingredient usage (CSV) + Premixes (PDF)</td><td class="py-1.5">Together: recipe (intended) dose from what each pen was fed. Export both for the same dates. Neither works on its own.</td></tr>
+          <tr class="border-t border-border"><td class="py-1.5 pr-4 font-medium">Ingredient/Premix Usage summary</td><td class="py-1.5">Can't be used: it adds the premix mixing on top of what the cows ate and doesn't show what's in each premix.</td></tr>
+          <tr class="border-t border-border"><td class="py-1.5 pr-4 font-medium">Recipes (PDF)</td><td class="py-1.5">Not needed.</td></tr>
+        </tbody></table>
+      </div>
+    </details>
   </section>
 
   <!-- error -->
@@ -129,7 +154,7 @@
           <div id="r-period" class="text-sm text-muted-foreground"></div>
         </div>
         <div class="sm:text-right">
-          <div class="text-xs text-muted-foreground">Bovaer dose</div>
+          <div id="r-dose-label" class="text-xs text-muted-foreground">Bovaer dose</div>
           <div><span id="r-dose" class="text-3xl font-semibold tnum">—</span>
             <span class="text-sm text-muted-foreground">mg 3-NOP / kg DM</span></div>
           <div id="r-dose-sub" class="text-xs text-muted-foreground"></div>

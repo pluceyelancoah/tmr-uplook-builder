@@ -173,3 +173,70 @@ test("outputName strips the extension regardless of case", () => {
   assert.equal(C.outputName("Report.Xlsx"), "UpLook_Ingredient_Upload_Report");
   assert.equal(C.outputName("Load_report.csv"), "UpLook_Ingredient_Upload_Load_report");
 });
+
+test("Load report: recipe (intended) dose from the batch call weights", () => {
+  const withCalls = CARRY.replace(/,0,0,(\d+),(\d+),0,0,0,0,0,A/g, ",$1,$2,$1,$2,0,0,0,0,0,A");
+  const { data } = C.processReport("Load_report.csv", withCalls, XLSX);
+  // calls = loads here, so intended = actual: 50 lb (BOVAR A) + 100 lb (BOVAR B)
+  close(data.dose.intended.bovaerAsFed, 0.075, "intended Bovaer as fed t");
+  close(data.dose.intended.mgPerKg, data.dose.mgPerKg, "intended dose");
+  assert.equal(C.processReport("Load_report.csv", CARRY, XLSX).data.dose.intended, null);
+});
+
+// Premixes report as pdf.js text lines. BOVAR = 10% Bovaer as fed; PREMIX = 20% BOVAR as fed.
+const PREMIXES = ["TEST DAIRY", "Premixes", "Generated: 09/17/2026 08:00 AM",
+  "Bovaer Premix", "Recipe Display name Density Dry matter % Actual weight Dry weight Price% Not in use%",
+  "Bovaer Premix BOVAR 40.00 90.1% 10.00 9.01 1.00",
+  "Ingredient Display name Dry matter % Weight/Animal Load % Weight/Animal Load %",
+  "1 GROUND CORN GRDCRN 89.0% 9.00 90.0% 8.01 88.9%",
+  "2 Bovaer Bovaer 100.0% 1.00 10.0% 1.00 11.1%",
+  "Premix MILK COWS", "Recipe Display name Density Dry matter % Actual weight Dry weight Price% Not in use%",
+  "Premix MILK COWS PREMIX 40.00 89.2% 10.00 8.92 1.00",
+  "Ingredient Display name Dry matter % Weight/Animal Load % Weight/Animal Load %",
+  "1 CANOLA CANOLA 89.0% 8.00 80.0% 7.12 79.8%",
+  "2 Bovaer Premix BOVAR 90.1% 2.00 20.0% 1.80 20.2%"];
+const USAGE = ["# Farm: TEST DAIRY", "Group,# Animals,Ingredient,Actual weight,Dry weight,Unit,Act w/Animal,Dry w/Animal,Unit,Price,Price/Animal",
+  "Premix MILK COWS,1 - High ,100,1.00,0.89,Ton,0,0,Lbs,0,0",
+  "Corn silage,1 - High ,100,3.00,1.00,Ton,0,0,Lbs,0,0",
+  "Hay,9 - Dry ,50,1.00,0.90,Ton,0,0,Lbs,0,0"].join("\n");
+const status = r => Object.fromEntries(r.files.map(f => [f.kind, f.status]));
+
+test("Premixes report: recipes, Bovaer premix and the premixes that carry it", () => {
+  const p = C.parsePremixes(PREMIXES);
+  assert.equal(p.kind, "premixes"); assert.equal(p.generated, "09/17/2026");
+  assert.equal(p.bovarCode, "BOVAR"); assert.deepEqual(p.carriers, ["PREMIX"]);
+  close(p.recipes.BOVAR.afShare.Bovaer, 0.1, "Bovaer % of BOVAR");
+  close(p.recipes.PREMIX.afShare.BOVAR, 0.2, "BOVAR % of PREMIX");
+});
+
+test("Ingredient usage + Premixes: intended dose over the pens fed the Bovaer-carrying premix", () => {
+  const r = C.analyze([{ name:"Ingredient_usage.csv", content:USAGE }, { name:"Premixes.pdf", content:PREMIXES }], XLSX);
+  assert.equal(r.basis, "intended");
+  assert.deepEqual(r.result.info.excluded, ["9 - Dry"]);
+  close(r.result.data.herdDM, 1.89, "herd DM t");
+  close(r.result.data.dose.bovaerAsFed, 0.02, "Bovaer as fed t (1 t x 20% x 10%)");
+  close(r.result.data.dose.mgPerKg, 0.02 * 0.1 / 1.89 * 1e6, "dose");
+  assert.deepEqual(status(r), { usage:"used", premixes:"used" });
+  assert.match(r.guidance.join(" "), /Load report/);
+});
+
+test("Each partial file says what else is needed", () => {
+  const u = C.analyze([{ name:"Ingredient_usage.csv", content:USAGE }], XLSX);
+  assert.equal(u.result, null); assert.equal(status(u).usage, "needs another file");
+  assert.match(u.guidance.join(" "), /Premixes report/);
+  const p = C.analyze([{ name:"Premixes.pdf", content:PREMIXES }], XLSX);
+  assert.equal(p.result, null); assert.match(p.guidance.join(" "), /Ingredient usage/);
+  const none = C.analyze([{ name:"notes.txt", content:"" }], XLSX);
+  assert.equal(none.result, null); assert.equal(status(none).unknown, "unusable");
+  assert.match(none.guidance.join(" "), /Load report/);
+});
+
+test("Load report wins; usage + premixes become a cross-check, the summary is flagged unusable", () => {
+  const summary = "# Farm: X\nIngredient,Call weight,Loaded weight,Unit\nCANOLA (CANOLA),1,1,Ton\n";
+  const r = C.analyze([{ name:"Load_report.csv", content:CARRY }, { name:"Ingredient_usage.csv", content:USAGE },
+                       { name:"Premixes.pdf", content:PREMIXES }, { name:"Ingredient_Premix_Usage.csv", content:summary }], XLSX);
+  assert.equal(r.basis, "actual");
+  close(r.result.data.dose.mgPerKg, C.processReport("Load_report.csv", CARRY, XLSX).data.dose.mgPerKg, "dose from the Load report");
+  close(r.result.info.crossCheck.mgPerKg, 0.02 * 0.1 / 1.89 * 1e6, "cross-check");
+  assert.deepEqual(status(r), { load:"used", usage:"used", premixes:"used", summary:"unusable" });
+});
