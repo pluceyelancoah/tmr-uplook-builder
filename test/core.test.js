@@ -44,9 +44,10 @@ test("Load report: premixes and BOVAR broken out, totals reconcile, dose on as-f
   close(t.Bovaer, 0.009, "Bovaer DM");
   close(t.GRDCRN, 0.091, "GRDCRN");
 
-  // 0.009 t DM / 90% DM = 0.01 t as fed; x 10% 3-NOP / 1 t DM eaten = 1,000 mg/kg
-  close(data.dose.bovaerAsFed, 0.01, "Bovaer as fed");
-  close(data.dose.mgPerKg, 1000, "dose");
+  // As fed: 570 lb PREMIX x 450/1,150 Bovaer premix x 100/1,100 Bovaer; x 10% 3-NOP / 2,000 lb DM eaten
+  const bovaerLb = 570 * 450 / 1150 * 100 / 1100;
+  close(data.dose.bovaerAsFed, bovaerLb / 2000, "Bovaer as fed");
+  close(data.dose.mgPerKg, bovaerLb * 0.1 / 2000 * 1e6, "dose");
 });
 
 test("Load report: Bovaer Dose Calculator inputs reproduce the dose", () => {
@@ -57,7 +58,8 @@ test("Load report: Bovaer Dose Calculator inputs reproduce the dose", () => {
   assert.equal(s.code, "PREMIX");
   close(s.inclusionPct, 100 / 1100 * 100, "Bovaer % of BOVAR, as fed");
   close(s.quantityLb, 570, "PREMIX loaded into rations, as fed lb");
-  close(s.bovaerLb, 20, "Bovaer lb");
+  close(s.bovaerLb, 570 * 450 / 1150 * 100 / 1100, "Bovaer lb");
+  close(s.nestedPct, 450 / 1150 * 100, "Bovaer premix % of PREMIX, as fed");
   close(calc.totalFeedLbDM, 2000, "total feed lb DM");
   // Calculator math: lb x 0.4536 kg x (100,000 mg/kg x inclusion% x nested%) / kg DM
   const mg = s.quantityLb * 0.45359237 * 100000 * s.inclusionPct / 100 * s.nestedPct / 100;
@@ -84,28 +86,29 @@ const CARRY = ["# Farm: TEST DAIRY", HEAD,
   row("h2", "HIGH COW (HIGCOW)", "Corn silage 2025 (CORSL)", "2026-09-15 08:01:00", 3000, 1000),
 ].join("\r\n");
 
-test("Load report: BOVAR batch carried forward, premix fed first-in first-out, only the last month counted", () => {
+test("Load report: only the last month counted, shares from the batches made in that month", () => {
   const { data, info } = C.processReport("Load_report.csv", CARRY, XLSX);
   assert.equal(data.dateRange, "From 9/1/2026 until 9/15/2026");
-  close(data.herdDM, 2, "herd DM t (Aug 25 load is history only)");
-  // Sep 5 eats the rest of P1 (made with BOVAR A: 500 lb x 10% = 50 lb Bovaer); Sep 15 eats P2 (BOVAR B: 500 x 20% = 100)
-  close(data.dose.bovaerAsFed, 0.075, "Bovaer as fed t");
-  close(data.dose.mgPerKg, 0.075 * 0.1 / 2 * 1e6, "dose");
+  close(data.herdDM, 2, "herd DM t (Aug 25 load not counted)");
+  // Sep batches only: P2 = 1,100/2,200 Bovaer premix as fed, BOVAR B = 200/1,100 Bovaer; 2,200 lb PREMIX fed
+  close(data.dose.bovaerAsFed, 0.1, "Bovaer as fed t");
+  close(data.dose.mgPerKg, 0.1 * 0.1 / 2 * 1e6, "dose");
   const t = byCode(data);
-  close(t.Bovaer, 0.075, "Bovaer DM"); close(t.GRDCRN, 0.425, "GRDCRN"); close(t.CANOLA, 0.5, "CANOLA");
+  close(t.Bovaer, 0.1, "Bovaer DM"); close(t.GRDCRN, 0.4, "GRDCRN"); close(t.CANOLA, 0.5, "CANOLA");
   close(data.afterTotal, data.herdDM, "after = herd");
   assert.match(info.notes.join(" "), /Counted 9\/1\/2026/);
   const s = data.calculator.sources[0];
   close(s.quantityLb, 2200, "PREMIX as fed");
-  close(s.inclusionPct, 150 / 1100 * 100, "Bovaer % of BOVAR fed");
+  close(s.inclusionPct, 200 / 1100 * 100, "Bovaer % of BOVAR made in the month");
+  close(s.nestedPct, 50, "BOVAR % of PREMIX made in the month");
   close(data.calculator.mgPerKg, data.dose.mgPerKg, "calculator dose");
 });
 
-test("Load report: premix mixed before the month's first BOVAR batch borrows it, with a note", () => {
-  const early = LOAD_REPORT.replace(/2026-09-01 08:0/g, "2026-09-02 10:0");
-  const { data, info } = C.processReport("Load_report.csv", early, XLSX);
-  close(data.dose.mgPerKg, 1000, "dose");
-  assert.match(info.notes.join(" "), /mixed before the first Bovaer premix batch/);
+test("Load report: no Bovaer premix batch in the month -> the last one before it, with a note", () => {
+  const noSepBovar = CARRY.split("\r\n").filter(l => !l.startsWith("b,")).join("\r\n");
+  const { data, info } = C.processReport("Load_report.csv", noSepBovar, XLSX);
+  close(data.dose.bovaerAsFed, 1100 * 100 / 1100 / 2000, "Bovaer as fed t (BOVAR A, 100/1,100)");
+  assert.match(info.notes.join(" "), /No Bovaer Premix batch was made in this period/);
 });
 
 test("Load report: no BOVAR batches -> BOVAR flagged as missing, no dose", () => {
@@ -177,8 +180,8 @@ test("outputName strips the extension regardless of case", () => {
 test("Load report: recipe (intended) dose from the batch call weights", () => {
   const withCalls = CARRY.replace(/,0,0,(\d+),(\d+),0,0,0,0,0,A/g, ",$1,$2,$1,$2,0,0,0,0,0,A");
   const { data } = C.processReport("Load_report.csv", withCalls, XLSX);
-  // calls = loads here, so intended = actual: 50 lb (BOVAR A) + 100 lb (BOVAR B)
-  close(data.dose.intended.bovaerAsFed, 0.075, "intended Bovaer as fed t");
+  // calls = loads here, so intended = actual
+  close(data.dose.intended.bovaerAsFed, 0.1, "intended Bovaer as fed t");
   close(data.dose.intended.mgPerKg, data.dose.mgPerKg, "intended dose");
   assert.equal(C.processReport("Load_report.csv", CARRY, XLSX).data.dose.intended, null);
 });
