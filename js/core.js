@@ -594,22 +594,27 @@ function doseCheckWorkbook(check, XLSX){
 
   // Dose check sheet, built top-down so the Load report formulas can point at its % cells.
   const aoa = [[`Bovaer dose check: ${check.farm || ""}${check.dateRange ? " · " + check.dateRange.replace(/^From /, "").replace(" until ", " to ") : ""}`],
-    ["Every value is a formula on the Load report sheet: the period's rows exactly as exported, plus two added columns."], []];
+    ["Every number is a formula on the Load report sheet (the period's rows exactly as exported). Click a number to see its formula, or press Ctrl+` to show them all."], []];
+  const q = s => `"${s}"`, WHERE = "Where it comes from (Load report sheet)", PDF = "On the dose report PDF";
   const bovRow = {}, nestRow = {}, pct = {};
-  aoa.push(["", "Bovaer, lb", "Batch total, lb", "Bovaer %"]);
+  aoa.push(["", "Bovaer, lb", "Batch total, lb", "Bovaer %", PDF, WHERE]);
   check.bovars.forEach(bv => {
     const n = aoa.length + 1, a = check.bovaerIngs.reduce((s, i) => s + sumIf(iAct, [[iRec, bv.recipe], [iIng, i]]), 0), b = sumIf(iAct, [[iRec, bv.recipe], [iIng, "<>"]]);
     bovRow[bv.code] = n; pct[bv.code] = b ? a / b : 0;
     aoa.push([`Bovaer in ${bv.name} batches`, cell(check.bovaerIngs.map(i => sumifsF(ACT, [[REC, bv.recipe], [ING, i]])).join("+"), a, "#,##0"),
-      cell(sumifsF(ACT, [[REC, bv.recipe], [ING, "<>"]]), b, "#,##0"), cell(`IF(C${n}=0,0,B${n}/C${n})`, pct[bv.code], "0.0000%")]);
+      cell(sumifsF(ACT, [[REC, bv.recipe], [ING, "<>"]]), b, "#,##0"), cell(`IF(C${n}=0,0,B${n}/C${n})`, pct[bv.code], "0.0000%"),
+      "Inclusion % (Bovaer in blend)",
+      `Recipe ${q(bv.recipe)}: B = Ingredient ${check.bovaerIngs.map(q).join(" + ")}, C = all ingredients; sum of Actual weight (column ${ACT}). D = B ÷ C`]);
   });
-  aoa.push([]); aoa.push(["", "Bovaer premix, lb", "Batch total, lb", "Bovaer premix %"]);
+  aoa.push([]); aoa.push(["", "Bovaer premix, lb", "Batch total, lb", "Bovaer premix %", PDF, WHERE]);
   check.carriers.forEach(c => c.bovars.filter(bv => bv in bovRow).forEach(bv => {
     const n = aoa.length + 1, bvIng = (check.bovars.find(x => x.code === bv) || {}).ing;
     const a = sumIf(iAct, [[iRec, c.recipe], [iIng, bvIng]]), b = sumIf(iAct, [[iRec, c.recipe], [iIng, "<>"]]);
     (nestRow[c.code] = nestRow[c.code] || {})[bv] = n; pct[c.code + "|" + bv] = b ? a / b : 0;
     aoa.push([`${(check.bovars.find(x => x.code === bv) || {}).name} in ${c.name} batches`, cell(sumifsF(ACT, [[REC, c.recipe], [ING, bvIng]]), a, "#,##0"),
-      cell(sumifsF(ACT, [[REC, c.recipe], [ING, "<>"]]), b, "#,##0"), cell(`IF(C${n}=0,0,B${n}/C${n})`, pct[c.code + "|" + bv], "0.0000%")]);
+      cell(sumifsF(ACT, [[REC, c.recipe], [ING, "<>"]]), b, "#,##0"), cell(`IF(C${n}=0,0,B${n}/C${n})`, pct[c.code + "|" + bv], "0.0000%"),
+      `${c.name}: Nested % in Premix`,
+      `Recipe ${q(c.recipe)}: B = Ingredient ${q(bvIng)}, C = all ingredients; sum of Actual weight (column ${ACT}). D = B ÷ C`]);
   }));
 
   // Load report sheet: Bovaer fed on the premix (or Bovaer premix) rows of milking-cow rations, and their DM.
@@ -619,7 +624,7 @@ function doseCheckWorkbook(check, XLSX){
     if (parts.length) viaIng[c.ing.toLowerCase()] = { code:c.code, f: parts.map(bv => `${D}$D$${nestRow[c.code][bv]}*${D}$D$${bovRow[bv]}`).join("+"),
       v: parts.reduce((s, bv) => s + pct[c.code + "|" + bv] * pct[bv], 0) }; });
   check.bovars.forEach(bv => { viaIng[bv.ing.toLowerCase()] = { code:bv.code, f:`${D}$D$${bovRow[bv.code]}`, v:pct[bv.code] }; });
-  const lr = [head.concat(["Bovaer fed (lb)", "Milking-cow DM (lb)"])], fed = {}, qty = {};
+  const lr = [head.concat(["Bovaer fed (lb) = Actual weight x Bovaer premix % x Bovaer %", "Milking-cow DM (lb)"])], fed = {}, qty = {};
   let bovaerTot = 0, dmTot = 0;
   rows.forEach((r, k) => {
     // Blank cells stay empty (null): Excel's "<>" criterion counts an empty-text cell as filled
@@ -634,23 +639,29 @@ function doseCheckWorkbook(check, XLSX){
     lr.push(out);
   });
 
-  aoa.push([]); aoa.push(["Source (as in the dose report PDF)", "Quantity fed, lb", "Bovaer fed, lb"]);
+  aoa.push([]); aoa.push(["Source (as in the dose report PDF)", "Quantity fed, lb", "Bovaer fed, lb", "", PDF, WHERE]);
   [...check.carriers, ...check.bovars].filter(c => c.code in qty).forEach(c =>
     aoa.push([c.name, cell(`SUMIFS(${col(ACT)},${col(ING)},${crit(c.ing)},${col(Q)},"<>")`, qty[c.code], "#,##0"),
-      cell(`SUMIFS(${col(Q)},${col(ING)},${crit(c.ing)})`, fed[c.code], "#,##0.0")]));
+      cell(`SUMIFS(${col(Q)},${col(ING)},${crit(c.ing)})`, fed[c.code], "#,##0.0"), "",
+      `${c.name}: Quantity Fed (As-Fed)`,
+      `Ingredient ${q(c.ing)} in the milking-cow rations: B = sum of Actual weight (column ${ACT}), C = sum of Bovaer fed (column ${Q})`]));
   const totRow = aoa.length + 1;
-  aoa.push(["Total Bovaer fed, lb", "", cell(`SUM(${col(Q)})`, bovaerTot, "#,##0.0")]);
+  aoa.push(["Total Bovaer fed, lb", "", cell(`SUM(${col(Q)})`, bovaerTot, "#,##0.0"), "",
+    "Total 3-NOP (A) = this × 10% × 453,592 mg/lb",
+    `Sum of column ${Q}. Each premix row: Actual weight × Bovaer premix % × Bovaer % (from the rows above)`]);
   aoa.push([]);
   const dmRow = aoa.length + 1;
-  aoa.push(["Total feed delivered (dry matter), lb", cell(`SUM(${col(R)})`, dmTot, "#,##0")]);
-  aoa.push(["Dose, mg 3-NOP / kg DM", cell(`IF(B${dmRow}=0,0,C${totRow}*${NOP_IN_BOVAER}/B${dmRow}*1000000)`, dmTot ? bovaerTot * NOP_IN_BOVAER / dmTot * 1e6 : 0, "0.00")]);
+  aoa.push(["Total feed delivered (dry matter), lb", cell(`SUM(${col(R)})`, dmTot, "#,##0"), "", "",
+    "Total Feed Delivered (Dry Matter)", `Sum of column ${R} = Dry weight (column ${DRY}) of every milking-cow ration row`]);
+  aoa.push(["Dose, mg 3-NOP / kg DM", cell(`IF(B${dmRow}=0,0,C${totRow}*${NOP_IN_BOVAER}/B${dmRow}*1000000)`, dmTot ? bovaerTot * NOP_IN_BOVAER / dmTot * 1e6 : 0, "0.00"), "", "",
+    "Calculated Final Dose", `Total Bovaer fed (C${totRow}) × 10% 3-NOP ÷ total dry matter (B${dmRow}) × 1,000,000`]);
   aoa.push([]);
   aoa.push([`Milking-cow rations: ${check.lactating.map(nameOf).join(", ")}`]);
   aoa.push([`Load report column ${Q} (Bovaer fed) = Actual weight x Bovaer premix % x Bovaer %, on the premix rows of milking-cow rations. Column ${R} = their Dry weight.`]);
   aoa.push(["The Bovaer in the Bovaer premix batches is what was mixed this period, not what was fed: Bovaer premix stays in the bin between batches."]);
 
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(aoa); ws["!cols"] = [{ wch:52 }, { wch:20 }, { wch:20 }, { wch:16 }];
+  const ws = XLSX.utils.aoa_to_sheet(aoa); ws["!cols"] = [{ wch:44 }, { wch:18 }, { wch:18 }, { wch:16 }, { wch:38 }, { wch:120 }];
   const wl = XLSX.utils.aoa_to_sheet(lr); wl["!cols"] = head.map(h => ({ wch: ["Recipe","Ingredient"].includes(h) ? 32 : h === "BatchId" ? 14 : 18 })).concat([{ wch:16 }, { wch:19 }]);
   wl["!autofilter"] = { ref: `A1:${R}${lr.length}` };
   XLSX.utils.book_append_sheet(wb, ws, "Dose check");
