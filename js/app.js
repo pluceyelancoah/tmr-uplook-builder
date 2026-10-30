@@ -1,9 +1,9 @@
 /* Page wiring: reads the dropped file, renders the summary and working, builds the UpLook download. */
 (function () {
 "use strict";
-const { HEADERS, UserError, analyze, uploadRows, outputName } = window.TMRCore;
+const { HEADERS, UserError, analyze, uploadRows, outputName, doseCheckWorkbook, checkName } = window.TMRCore;
 
-let lastRows = null, lastName = "uplook_ingredient_usage", lastData = null, lastInfo = null;
+let lastRows = null, lastName = "uplook_ingredient_usage", lastData = null, lastInfo = null, lastCheck = null;
 const files = [];   // {name, content}: text for CSV, ArrayBuffer for Excel, text lines for PDF
 
 const $ = id => document.getElementById(id);
@@ -199,6 +199,8 @@ function run(){
     if (!a.result){ $("result").classList.add("hidden"); $("error").classList.add("hidden"); return; }
     const main = a.files.find(f => f.status === "used");
     lastName = outputName(main.name);
+    lastCheck = a.result.check && a.result.data.dose ? { check: a.result.check, name: checkName(main.name) } : null;
+    $("dl-check").classList.toggle("hidden", !lastCheck);
     show(a.result.data, a.result.info, a.files.filter(f => f.status === "used").map(f => f.name).join(" + "));
   }catch(err){
     if (err instanceof UserError) fail(err.message);
@@ -219,7 +221,7 @@ async function handleFiles(list){
   run();
 }
 
-$("clear-files").onclick = () => { files.length = 0; lastRows = lastData = null;
+$("clear-files").onclick = () => { files.length = 0; lastRows = lastData = lastCheck = null;
   $("files").classList.add("hidden"); $("result").classList.add("hidden"); $("error").classList.add("hidden");
   $("drop-title").textContent = "Drop your TapFeed Load report here"; $("drop-sub").textContent = "or click to choose it"; };
 
@@ -232,6 +234,8 @@ fileInput.onchange = e => { if(e.target.files.length) handleFiles([...e.target.f
 drop.addEventListener("drop", e=>{ if(e.dataTransfer.files.length) handleFiles([...e.dataTransfer.files]); });
 
 const downloadPdf = () => { if (lastData) window.TMRPdf.download(lastData, lastInfo, lastName); };
+const downloadCheck = () => { if (lastCheck) XLSX.writeFile(doseCheckWorkbook(lastCheck.check, XLSX).wb, lastCheck.name + ".xlsx"); };
+const downloadExtras = () => { downloadPdf(); downloadCheck(); };
 
 $("dl-xlsx").onclick = ()=>{
   if(!lastRows) return;
@@ -240,7 +244,7 @@ $("dl-xlsx").onclick = ()=>{
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
   XLSX.writeFile(wb, lastName+".xlsx");
-  downloadPdf();
+  downloadExtras();
 };
 $("dl-csv").onclick = ()=>{
   if(!lastRows) return;
@@ -248,7 +252,8 @@ $("dl-csv").onclick = ()=>{
   const csv = [HEADERS, ...lastRows].map(r=>r.map(cell).join(",")).join("\r\n");
   const blob = new Blob([csv], {type:"text/csv"});
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = lastName+".csv"; a.click();
-  downloadPdf();
+  downloadExtras();
 };
 $("dl-pdf").onclick = downloadPdf;
+$("dl-check").onclick = downloadCheck;
 })();

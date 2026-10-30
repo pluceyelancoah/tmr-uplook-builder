@@ -119,12 +119,38 @@ test("Load report: no BOVAR batches -> BOVAR flagged as missing, no dose", () =>
   assert.equal(data.dose, null);
 });
 
-test("Load report: missing premix batches are flagged, not silently dropped", () => {
+test("Load report: missing premix batches are named, not silently dropped", () => {
   const noPremix = LOAD_REPORT.split("\r\n").filter(l => !l.startsWith("p1,")).join("\r\n");
-  const { data } = C.processReport("Load_report.csv", noPremix, XLSX);
-  assert.equal(data.missing.length, 1);
-  assert.equal(data.missing[0].code, "PREMIX");
-  assert.equal(data.dose, null);
+  assert.throws(() => C.processReport("Load_report.csv", noPremix, XLSX),
+    e => e instanceof C.UserError && /Premix MILK COWS/.test(e.message) && /without a recipe filter/.test(e.message));
+});
+
+test("Load report: recipe names are not fixed; the chain is followed from Bovaer", () => {
+  const renamed = CARRY.replace(/Bovaer Premix \(BOVAR\)/g, "Bov Blend (BVB)")
+    .replace(/Premix MILK COWS \(PREMIX\)/g, "Lact Mix A (LMA)").replace(/HIGH COW \(HIGCOW\)/g, "Pen 1 TMR (P1)");
+  const a = C.processReport("Load_report.csv", CARRY, XLSX), b = C.processReport("Load_report.csv", renamed, XLSX);
+  assert.deepEqual(b.info.included, ["Pen 1 TMR"]);
+  close(b.data.dose.mgPerKg, a.data.dose.mgPerKg, "dose");
+  assert.deepEqual(b.data.calculator.sources.map(s => s.name), ["Lact Mix A"]);
+});
+
+test("Dose check workbook: formulas on the exported rows rebuild the dose", () => {
+  for (const csv of [LOAD_REPORT, CARRY]){
+    const r = C.processReport("Load_report.csv", csv, XLSX), w = C.doseCheckWorkbook(r.check, XLSX);
+    close(w.mgPerKg, r.data.dose.mgPerKg, "workbook dose");
+    close(w.bovaerLb, r.data.dose.bovaerAsFed * 2000, "Bovaer lb");
+    close(w.dmLb, r.data.herdDM * 2000, "DM lb");
+    const back = XLSX.read(XLSX.write(w.wb, { type:"buffer", bookType:"xlsx" }), { type:"buffer", cellFormula:true });
+    assert.deepEqual(back.SheetNames, ["Dose check", "Load report"]);
+    const lr = back.Sheets["Load report"], cells = Object.keys(lr).filter(k => /^Q\d+$/.test(k) && lr[k].f);
+    assert.ok(cells.length > 0 && cells.every(k => /^I\d+\*\('Dose check'!\$D\$\d+\*'Dose check'!\$D\$\d+\)$/.test(lr[k].f)), "Bovaer fed formulas");
+    assert.ok(Object.values(back.Sheets["Dose check"]).some(c => c && c.f && /^SUMIFS\(/.test(c.f)), "SUMIFS on the Load report");
+    // Excel's "<>" criterion treats empty-text cells as filled, which would add the unload rows to batch totals
+    assert.ok(!Object.keys(lr).some(k => k[0] !== "!" && lr[k].t === "s" && lr[k].v === ""), "no empty-text cells");
+  }
+  // Only the counted month's rows are on the Load report sheet
+  const r = C.processReport("Load_report.csv", CARRY, XLSX);
+  assert.ok(r.check.rows.every(row => row[5] >= "2026-09-01"));
 });
 
 test("Ingredient/Premix Usage summary is rejected with a clear message", () => {

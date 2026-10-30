@@ -88,7 +88,8 @@ const usDate = iso => { const [y,m,d] = iso.split("-").map(Number); return `${m}
 
 // Single-month method, checkable from the report alone: only the last month in the file is counted, and the Bovaer %
 // and Bovaer premix % come from the batches made in that month. Bovaer fed = premix fed (as fed) x Bovaer premix %
-// x Bovaer %. Lactating = rations that contain a Bovaer-carrying premix (PREMIX / 2PRMIX).
+// x Bovaer %. Recipe names are not fixed: the chain is followed from the ingredient named Bovaer to the Bovaer
+// premix(es) that contain it, the premixes that carry those, and the rations (lactating) that contain either.
 function fromLoadReport(grid){
   const head = grid[0].map(h => String(h).trim());
   const cBatch = head.indexOf("BatchId"), cRecipe = head.indexOf("Recipe"), cIng = head.indexOf("Ingredient"),
@@ -97,7 +98,7 @@ function fromLoadReport(grid){
   const S = v => (v===undefined||v===null) ? "" : String(v).trim();
   const lbs = v => parseFloat(S(v).replace(/,/g,"")) || 0;   // Load report weights are in pounds
 
-  const byId = new Map(), names = {}; let first = "", last = "";
+  const byId = new Map(), names = {}, recipeText = {}, ingText = {}; let first = "", last = "";
   const cCall = head.indexOf("Actual call weight");
   for (const r of grid.slice(1)){
     if (r.length < head.length/2) continue;
@@ -106,8 +107,9 @@ function fromLoadReport(grid){
     if (!S(r[cIng])) continue;                                   // pen-delivery row
     const rc = codeOf(r[cRecipe]), ing = codeOf(r[cIng]);
     names[rc] = nameOf(r[cRecipe]); if(!(ing in names)) names[ing] = nameOf(r[cIng]);
+    recipeText[rc] = S(r[cRecipe]); ingText[ing] = S(r[cIng]);
     let b = byId.get(S(r[cBatch]));
-    if (!b){ b = {recipe:rc, time:ts, ing:{}}; byId.set(S(r[cBatch]), b); }
+    if (!b){ b = {id:S(r[cBatch]), recipe:rc, time:ts, ing:{}}; byId.set(S(r[cBatch]), b); }
     if (ts && ts < b.time) b.time = ts;
     const x = b.ing[ing] = b.ing[ing] || {act:0, dry:0, call:0};
     x.act += lbs(r[cAct]); x.dry += lbs(r[cDry]); x.call += lbs(r[cCall]);
@@ -117,19 +119,29 @@ function fromLoadReport(grid){
 
   const uses = {};
   batches.forEach(b => { uses[b.recipe] = uses[b.recipe] || new Set(); Object.keys(b.ing).forEach(i => uses[b.recipe].add(i)); });
-  const recipes = Object.keys(uses);
+  const recipes = Object.keys(uses), isRecipe = c => c in uses;
+  const used = new Set(recipes.flatMap(rc => [...uses[rc]]));
   const premixRecipes = recipes.filter(rc => recipes.some(o => o !== rc && uses[o].has(rc)));
-  const lactating = recipes.filter(rc => PREMIX_CODES.some(p => uses[rc].has(p)));
-  const excluded = recipes.filter(rc => !lactating.includes(rc) && !premixRecipes.includes(rc));
+  // Bovaer itself vs a Bovaer premix with no batches in the file (named like "Bovaer Premix")
+  const bovaerish = c => /bovaer/i.test(c) || /bovaer/i.test(names[c] || ""), blendish = c => /premix|blend|mix/i.test(names[c] || "");
+  const bovaerIngs = [...used].filter(c => bovaerish(c) && !isRecipe(c) && !blendish(c));
+  const bovarCodes = [...new Set([...recipes.filter(rc => bovaerIngs.some(i => uses[rc].has(i))),
+                                  ...[...used].filter(c => bovaerish(c) && !isRecipe(c) && blendish(c))])];
+  const carriers = premixRecipes.filter(rc => !bovarCodes.includes(rc) && bovarCodes.some(bv => uses[rc].has(bv)));
+  const lactating = recipes.filter(rc => !premixRecipes.includes(rc) && !bovarCodes.includes(rc)
+    && [...carriers, ...bovarCodes].some(p => uses[rc].has(p)));
+  const excluded = recipes.filter(rc => !lactating.includes(rc) && !premixRecipes.includes(rc) && !bovarCodes.includes(rc));
+  const isCarrier = c => carriers.includes(c), isBovar = c => bovarCodes.includes(c);
+  const unbatched = recipes.flatMap(rc => [...uses[rc]]).filter(c => !isRecipe(c) && /premix/i.test(names[c] || c));
 
   const monthStart = last.slice(0,8) + "01", start = first < monthStart ? monthStart : first;
   const made = code => batches.filter(b => b.recipe === code && sum(b.ing, "act") > 0);
-  const notes = [], missing = {};
+  const notes = [], missing = {}, fallbackIds = new Set();
   // Each recipe's shares come only from its batches made in the counted month (pooled by weight).
   const pooled = code => {
     const all = made(code); let use = all.filter(b => b.time.slice(0,10) >= start);
     if (!use.length && all.length){
-      use = [all[all.length-1]];
+      use = [all[all.length-1]]; fallbackIds.add(use[0].id);
       notes.push(`No ${names[code] || code} batch was made in this period, so the last one before it (${usDate(use[0].time.slice(0,10))}) was used.`);
     }
     if (!use.length) return null;
@@ -140,38 +152,41 @@ function fromLoadReport(grid){
     return { ing, frac, share: Object.fromEntries(Object.keys(ing).map(i => [i, frac(i, "dry")])) };
   };
   const rcp = {}, recipeOf = code => code in rcp ? rcp[code] : (rcp[code] = pooled(code));
+  const bovFrac = (r, k) => bovaerIngs.reduce((a, i) => a + r.frac(i, k), 0);
 
   const before = {}, after = {}, card = {}, src = {};
   let herd = 0;
   const add = (o, k, v) => o[k] = (o[k] || 0) + v;
   const source = code => src[code] = src[code] || {quantityLb:0, bovarAF:0, bovaerAF:0, bovaerDM:0, intendedAF:0};
 
-  // dm/af: lb of BOVAR reaching the cows. Dose follows the as-fed chain a verifier can redo from the report.
-  const feedBovar = (dm, af, callAf, s) => {
-    const r = recipeOf("BOVAR");
-    if (!r){ add(missing, "BOVAR", dm); return; }
-    card.BOVAR = card.BOVAR || {};
-    Object.entries(r.share).forEach(([i, sh]) => { add(after, i, dm * sh); add(card.BOVAR, i, dm * sh); });
-    const bov = r.ing.Bovaer || {act:0, dry:0}, bovaerAF = af * r.frac("Bovaer", "act");
-    s.bovarAF += af; s.bovaerAF += bovaerAF; s.bovaerDM += bov.act > 0 ? bovaerAF * bov.dry / bov.act : 0;
-    s.intendedAF += callAf * r.frac("Bovaer", "call");
+  // dm/af: lb of Bovaer premix reaching the cows. Dose follows the as-fed chain a verifier can redo from the report.
+  const feedBovar = (bv, dm, af, callAf, s) => {
+    const r = recipeOf(bv);
+    if (!r){ add(missing, bv, dm); return; }
+    card[bv] = card[bv] || {};
+    Object.entries(r.share).forEach(([i, sh]) => { add(after, i, dm * sh); add(card[bv], i, dm * sh); });
+    const bovAct = bovaerIngs.reduce((a, i) => a + (r.ing[i] || {act:0}).act, 0), bovDry = bovaerIngs.reduce((a, i) => a + (r.ing[i] || {dry:0}).dry, 0);
+    const bovaerAF = af * bovFrac(r, "act");
+    s.bovarAF += af; s.bovaerAF += bovaerAF; s.bovaerDM += bovAct > 0 ? bovaerAF * bovDry / bovAct : 0;
+    s.intendedAF += callAf * bovFrac(r, "call");
   };
   const feedPremix = (p, x) => {
     const r = recipeOf(p);
     if (!r){ add(missing, p, x.dry); return; }
     card[p] = card[p] || {};
-    Object.entries(r.share).forEach(([i, sh]) => { add(card[p], i, x.dry * sh); if (i !== "BOVAR") add(after, i, x.dry * sh); });
+    Object.entries(r.share).forEach(([i, sh]) => { add(card[p], i, x.dry * sh); if (!isBovar(i)) add(after, i, x.dry * sh); });
     const s = source(p); s.quantityLb += x.act;
-    if (r.share.BOVAR) feedBovar(x.dry * r.share.BOVAR, x.act * r.frac("BOVAR", "act"), x.act * r.frac("BOVAR", "call"), s);
+    bovarCodes.filter(bv => r.share[bv]).forEach(bv =>
+      feedBovar(bv, x.dry * r.share[bv], x.act * r.frac(bv, "act"), x.act * r.frac(bv, "call"), s));
   };
 
   for (const b of batches){
-    if (b.recipe === "BOVAR" || PREMIX_CODES.includes(b.recipe) || !lactating.includes(b.recipe)) continue;
+    if (isBovar(b.recipe) || isCarrier(b.recipe) || !lactating.includes(b.recipe)) continue;
     if (b.time.slice(0,10) < start) continue;
     for (const [i, x] of Object.entries(b.ing)){
       add(before, i, x.dry); herd += x.dry;
-      if (PREMIX_CODES.includes(i)) feedPremix(i, x);
-      else if (i === "BOVAR"){ const s = source("BOVAR"); s.quantityLb += x.act; feedBovar(x.dry, x.act, x.act, s); }
+      if (isCarrier(i)) feedPremix(i, x);
+      else if (isBovar(i)){ const s = source(i); s.quantityLb += x.act; feedBovar(i, x.dry, x.act, x.act, s); }
       else add(after, i, x.dry);
     }
   }
@@ -181,7 +196,7 @@ function fromLoadReport(grid){
   const T = v => v / LB_PER_TON;
   const desc = code => names[code] || "";
   const list = o => Object.entries(o).filter(([,v]) => T(v) > 0.0005).sort((a,b) => b[1]-a[1]).map(([code, dm]) => ({code, desc:desc(code), dm:T(dm)}));
-  const premixes = [...PREMIX_CODES, "BOVAR"].filter(p => card[p] && sum(card[p]) > 0).map(p => {
+  const premixes = [...carriers, ...bovarCodes].filter(p => card[p] && sum(card[p]) > 0).map(p => {
     const fed = sum(card[p]), mixedLb = made(p).filter(b => b.time.slice(0,10) >= start).reduce((a,b) => a + sum(b.ing, "dry"), 0);
     return { code:p, fedDM:T(fed), batchDM:T(mixedLb), rows: Object.entries(card[p]).sort((a,b) => b[1]-a[1])
       .map(([code, dm]) => ({code, desc:desc(code), pct: dm/fed*100, fedDM:T(dm)})) };
@@ -193,18 +208,30 @@ function fromLoadReport(grid){
     ? { mgPerKg: bovaerAF*NOP_IN_BOVAER/herd*1e6, target: DOSE_TARGET, bovaerAsFed: T(bovaerAF), bovaerDmPct: bovaerDM/bovaerAF*100,
         basis: "actual", intended: intendedAF > 0 ? { mgPerKg: intendedAF*NOP_IN_BOVAER/herd*1e6, bovaerAsFed: T(intendedAF) } : null } : null;
   const calcSources = dose ? Object.entries(src).filter(([, s]) => s.bovaerAF > 0).map(([code, s]) => {
-    const quantityLb = code === "BOVAR" ? s.bovarAF : s.quantityLb, inclusionPct = s.bovaerAF / s.bovarAF * 100;
+    const direct = isBovar(code), quantityLb = direct ? s.bovarAF : s.quantityLb, inclusionPct = s.bovaerAF / s.bovarAF * 100;
     return { code, name: names[code] || code, quantityLb, dmPct: null, inclusionPct,
-             nestedPct: code === "BOVAR" ? null : s.bovarAF / quantityLb * 100, bovaerLb: s.bovaerAF, nopMg: s.bovaerAF * NOP_IN_BOVAER * MG_PER_LB };
+             nestedPct: direct ? null : s.bovarAF / quantityLb * 100, bovaerLb: s.bovaerAF, nopMg: s.bovaerAF * NOP_IN_BOVAER * MG_PER_LB };
   }) : null;
   const dateRange = first ? `From ${usDate(start)} until ${usDate(last)}` : "";
   const beforeList = list(before), afterList = list(after);
+
+  const checkRows = grid.slice(1).filter(r => {
+    if (r.length < head.length/2) return false;
+    const id = S(r[cBatch]), t = ((byId.get(id) || {}).time || S(r[cDate])).slice(0,10);
+    return t >= start || fallbackIds.has(id);
+  });
+  const check = { head, rows: checkRows, dateRange,
+    lactating: lactating.map(rc => recipeText[rc]),
+    carriers: carriers.map(c => ({ code:c, name:names[c], recipe:recipeText[c], ing:ingText[c], bovars: bovarCodes.filter(bv => uses[c].has(bv)) })),
+    bovars: bovarCodes.filter(isRecipe).map(bv => ({ code:bv, name:names[bv], recipe:recipeText[bv], ing:ingText[bv] })),
+    bovaerIngs: bovaerIngs.map(i => ingText[i]) };
 
   return {
     data: { dateRange, days: daysInRange(dateRange), totalHeads: 0, herdDM: T(herd), missing: missingList, premixes,
             reportTotal: 0, mixingDM: 0, dose, calculator: calcSources && calcSummary(calcSources, T(herd)),
             before: beforeList, after: afterList, beforeTotal: sum(beforeList.map(r => r.dm)), afterTotal: sum(afterList.map(r => r.dm)) },
-    included: lactating.map(rc => names[rc] || rc), excluded: excluded.map(rc => names[rc] || rc), notes };
+    included: lactating.map(rc => names[rc] || rc), excluded: excluded.map(rc => names[rc] || rc), notes, check,
+    unbatched: [...new Set(unbatched)].map(c => names[c] || c) };
 }
 
 const toTons = (v,u) => { const n = parseFloat(v||0)||0; return (u && u.indexOf("100")>=0) ? n*100/2000 : n; };
@@ -521,8 +548,10 @@ function processReport(fileName, content, XLSX){
     if (head.includes("BatchId") && head.includes("Recipe") && head.includes("Dry weight")){
       const lr = fromLoadReport(grid);
       if (!lr.included.length)
-        throw new UserError("No milking-cow rations were found in that Load report (no ration contains PREMIX or 2PRMIX). Check the date range and try again.");
-      return { data: lr.data, info: { source:"TapFeed Load report", farm, included:lr.included, excluded:lr.excluded, notes:lr.notes } };
+        throw new UserError("No milking-cow rations were found in that Load report: no ration contains a premix with Bovaer in it."
+          + (lr.unbatched.length ? ` These premixes are used in rations but have no batches in the file: ${lr.unbatched.join(", ")}. Export the Load report without a recipe filter so the premix and Bovaer premix batches are included.` : " Check the date range and try again."));
+      return { data: lr.data, info: { source:"TapFeed Load report", farm, included:lr.included, excluded:lr.excluded, notes:lr.notes },
+               check: Object.assign(lr.check, { farm }) };
     }
     if (head[0] === "Ingredient" && head.includes("Loaded weight"))
       throw new UserError("That's the Ingredient/Premix Usage summary. It adds the premix mixing loads on top of what the cows ate and doesn't show what's in each premix, so it can't be used. Export the TapFeed Load report (CSV) instead.");
@@ -547,9 +576,92 @@ function processReport(fileName, content, XLSX){
 const uploadRows = data => data.after.map(r => [r.code, "", "", +r.dm.toFixed(3), "Dry Matter", "Lactating"]);
 const outputName = fileName => "UpLook_Ingredient_Upload_" + fileName.replace(/\.(csv|xlsx?)$/i, "");
 
+/* ---------- dose check workbook: the Load report rows + live formulas that rebuild the dose report ---------- */
+function doseCheckWorkbook(check, XLSX){
+  const { head, rows } = check, enc = XLSX.utils.encode_col;
+  const S = v => (v===undefined||v===null) ? "" : String(v).trim();
+  const num = v => parseFloat(S(v).replace(/,/g,"")) || 0;
+  const ix = n => head.indexOf(n), iAct = ix("Actual weight"), iDry = ix("Dry weight"), iRec = ix("Recipe"), iIng = ix("Ingredient");
+  const NUM = ["Actual call weight","Dry call weight","Actual weight","Dry weight","Error amount","Error %","Planned cost","Cost","Cost error"].map(ix);
+  const L = "'Load report'!", D = "'Dose check'!", ACT = enc(iAct), DRY = enc(iDry), REC = enc(iRec), ING = enc(iIng);
+  const Q = enc(head.length), R = enc(head.length + 1);
+  const col = c => `${L}$${c}:$${c}`;
+  const crit = s => `"=${String(s).replace(/[~*?]/g, "~$&").replace(/"/g, '""')}"`;
+  const match = (r, i, s) => s === "<>" ? S(r[i]) !== "" : S(r[i]).toLowerCase() === String(s).toLowerCase();
+  const sumIf = (vi, conds) => rows.filter(r => conds.every(([i, s]) => match(r, i, s))).reduce((a, r) => a + num(r[vi]), 0);
+  const sumifsF = (c, conds) => `SUMIFS(${col(c)},` + conds.map(([cc, s]) => `${col(cc)},${s === "<>" ? '"<>"' : crit(s)}`).join(",") + ")";
+  const cell = (f, v, z) => Object.assign({ t:"n", f, v }, z ? { z } : {});
+
+  // Dose check sheet, built top-down so the Load report formulas can point at its % cells.
+  const aoa = [[`Bovaer dose check: ${check.farm || ""}${check.dateRange ? " · " + check.dateRange.replace(/^From /, "").replace(" until ", " to ") : ""}`],
+    ["Every value is a formula on the Load report sheet: the period's rows exactly as exported, plus two added columns."], []];
+  const bovRow = {}, nestRow = {}, pct = {};
+  aoa.push(["", "Bovaer, lb", "Batch total, lb", "Bovaer %"]);
+  check.bovars.forEach(bv => {
+    const n = aoa.length + 1, a = check.bovaerIngs.reduce((s, i) => s + sumIf(iAct, [[iRec, bv.recipe], [iIng, i]]), 0), b = sumIf(iAct, [[iRec, bv.recipe], [iIng, "<>"]]);
+    bovRow[bv.code] = n; pct[bv.code] = b ? a / b : 0;
+    aoa.push([`Bovaer in ${bv.name} batches`, cell(check.bovaerIngs.map(i => sumifsF(ACT, [[REC, bv.recipe], [ING, i]])).join("+"), a, "#,##0"),
+      cell(sumifsF(ACT, [[REC, bv.recipe], [ING, "<>"]]), b, "#,##0"), cell(`IF(C${n}=0,0,B${n}/C${n})`, pct[bv.code], "0.0000%")]);
+  });
+  aoa.push([]); aoa.push(["", "Bovaer premix, lb", "Batch total, lb", "Bovaer premix %"]);
+  check.carriers.forEach(c => c.bovars.filter(bv => bv in bovRow).forEach(bv => {
+    const n = aoa.length + 1, bvIng = (check.bovars.find(x => x.code === bv) || {}).ing;
+    const a = sumIf(iAct, [[iRec, c.recipe], [iIng, bvIng]]), b = sumIf(iAct, [[iRec, c.recipe], [iIng, "<>"]]);
+    (nestRow[c.code] = nestRow[c.code] || {})[bv] = n; pct[c.code + "|" + bv] = b ? a / b : 0;
+    aoa.push([`${(check.bovars.find(x => x.code === bv) || {}).name} in ${c.name} batches`, cell(sumifsF(ACT, [[REC, c.recipe], [ING, bvIng]]), a, "#,##0"),
+      cell(sumifsF(ACT, [[REC, c.recipe], [ING, "<>"]]), b, "#,##0"), cell(`IF(C${n}=0,0,B${n}/C${n})`, pct[c.code + "|" + bv], "0.0000%")]);
+  }));
+
+  // Load report sheet: Bovaer fed on the premix (or Bovaer premix) rows of milking-cow rations, and their DM.
+  const lact = new Set(check.lactating.map(s => s.toLowerCase()));
+  const viaIng = {};
+  check.carriers.forEach(c => { const parts = Object.keys(nestRow[c.code] || {});
+    if (parts.length) viaIng[c.ing.toLowerCase()] = { code:c.code, f: parts.map(bv => `${D}$D$${nestRow[c.code][bv]}*${D}$D$${bovRow[bv]}`).join("+"),
+      v: parts.reduce((s, bv) => s + pct[c.code + "|" + bv] * pct[bv], 0) }; });
+  check.bovars.forEach(bv => { viaIng[bv.ing.toLowerCase()] = { code:bv.code, f:`${D}$D$${bovRow[bv.code]}`, v:pct[bv.code] }; });
+  const lr = [head.concat(["Bovaer fed (lb)", "Milking-cow DM (lb)"])], fed = {}, qty = {};
+  let bovaerTot = 0, dmTot = 0;
+  rows.forEach((r, k) => {
+    // Blank cells stay empty (null): Excel's "<>" criterion counts an empty-text cell as filled
+    const n = k + 2, out = head.map((h, i) => S(r[i]) === "" ? null : NUM.includes(i) ? num(r[i]) : S(r[i]));
+    if (lact.has(S(r[iRec]).toLowerCase()) && S(r[iIng])){
+      const via = viaIng[S(r[iIng]).toLowerCase()];
+      out[head.length] = via ? cell(`${ACT}${n}*(${via.f})`, num(r[iAct]) * via.v, "#,##0.00") : null;
+      out[head.length + 1] = cell(`${DRY}${n}`, num(r[iDry]), "#,##0");
+      if (via){ bovaerTot += num(r[iAct]) * via.v; fed[via.code] = (fed[via.code] || 0) + num(r[iAct]) * via.v; qty[via.code] = (qty[via.code] || 0) + num(r[iAct]); }
+      dmTot += num(r[iDry]);
+    }
+    lr.push(out);
+  });
+
+  aoa.push([]); aoa.push(["Source (as in the dose report PDF)", "Quantity fed, lb", "Bovaer fed, lb"]);
+  [...check.carriers, ...check.bovars].filter(c => c.code in qty).forEach(c =>
+    aoa.push([c.name, cell(`SUMIFS(${col(ACT)},${col(ING)},${crit(c.ing)},${col(Q)},"<>")`, qty[c.code], "#,##0"),
+      cell(`SUMIFS(${col(Q)},${col(ING)},${crit(c.ing)})`, fed[c.code], "#,##0.0")]));
+  const totRow = aoa.length + 1;
+  aoa.push(["Total Bovaer fed, lb", "", cell(`SUM(${col(Q)})`, bovaerTot, "#,##0.0")]);
+  aoa.push([]);
+  const dmRow = aoa.length + 1;
+  aoa.push(["Total feed delivered (dry matter), lb", cell(`SUM(${col(R)})`, dmTot, "#,##0")]);
+  aoa.push(["Dose, mg 3-NOP / kg DM", cell(`IF(B${dmRow}=0,0,C${totRow}*${NOP_IN_BOVAER}/B${dmRow}*1000000)`, dmTot ? bovaerTot * NOP_IN_BOVAER / dmTot * 1e6 : 0, "0.00")]);
+  aoa.push([]);
+  aoa.push([`Milking-cow rations: ${check.lactating.map(nameOf).join(", ")}`]);
+  aoa.push([`Load report column ${Q} (Bovaer fed) = Actual weight x Bovaer premix % x Bovaer %, on the premix rows of milking-cow rations. Column ${R} = their Dry weight.`]);
+  aoa.push(["The Bovaer in the Bovaer premix batches is what was mixed this period, not what was fed: Bovaer premix stays in the bin between batches."]);
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(aoa); ws["!cols"] = [{ wch:52 }, { wch:20 }, { wch:20 }, { wch:16 }];
+  const wl = XLSX.utils.aoa_to_sheet(lr); wl["!cols"] = head.map(h => ({ wch: ["Recipe","Ingredient"].includes(h) ? 32 : h === "BatchId" ? 14 : 18 })).concat([{ wch:16 }, { wch:19 }]);
+  wl["!autofilter"] = { ref: `A1:${R}${lr.length}` };
+  XLSX.utils.book_append_sheet(wb, ws, "Dose check");
+  XLSX.utils.book_append_sheet(wb, wl, "Load report");
+  return { wb, bovaerLb: bovaerTot, dmLb: dmTot, mgPerKg: dmTot ? bovaerTot * NOP_IN_BOVAER / dmTot * 1e6 : 0 };
+}
+const checkName = fileName => "Bovaer_Dose_Check_" + fileName.replace(/\.(csv|xlsx?)$/i, "");
+
 const api = { NON_PEN, PREMIX_CODES, HEADERS, NOP_IN_BOVAER, DOSE_TARGET, LABEL_MIN, LABEL_MAX, UserError, parseCSV, toRecords, rowsToRecords,
               fromLoadReport, toTons, daysInRange, build, calculatorInputs, processReport, uploadRows, outputName,
-              parsePremixes, fromUsage, identify, analyze, KINDS };
+              parsePremixes, fromUsage, identify, analyze, KINDS, doseCheckWorkbook, checkName };
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 else root.TMRCore = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
