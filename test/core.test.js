@@ -146,7 +146,7 @@ test("Dose check workbook: formulas on the exported rows rebuild the dose", () =
     assert.ok(cells.length > 0 && cells.every(k => /^I\d+\*\('Dose check'!\$D\$\d+\*'Dose check'!\$D\$\d+\)$/.test(lr[k].f)), "Bovaer fed formulas");
     assert.ok(Object.values(back.Sheets["Dose check"]).some(c => c && c.f && /^SUMIFS\(/.test(c.f)), "SUMIFS on the Load report");
     // Excel's "<>" criterion treats empty-text cells as filled, which would add the unload rows to batch totals
-    assert.ok(!Object.keys(lr).some(k => k[0] !== "!" && lr[k].t === "s" && lr[k].v === ""), "no empty-text cells");
+    assert.ok(!Object.keys(lr).some(k => /^[DQ]\d+$/.test(k) && lr[k].t === "s" && lr[k].v === ""), "no empty-text Ingredient or Bovaer fed cells");
   }
   // Only the counted month's rows are on the Load report sheet
   const r = C.processReport("Load_report.csv", CARRY, XLSX);

@@ -159,6 +159,10 @@ const loadScript = src => new Promise((ok, bad) => { const s = document.createEl
   s.onload = ok; s.onerror = () => bad(new Error("Couldn't load " + src)); document.head.appendChild(s); });
 // The worker script loaded first runs pdf.js on the page itself, which also works when the page is opened as a file.
 const pdfLib = () => pdfjs = pdfjs || loadScript("vendor/pdf.worker.min.js").then(() => loadScript("vendor/pdf.min.js")).then(() => window.pdfjsLib);
+// xlsx-js-style (SheetJS fork that writes cell colours) also sets window.XLSX, so the page's SheetJS is put back.
+let styleLib = null;
+const styledXLSX = () => styleLib = styleLib || (() => { const plain = window.XLSX;
+  return loadScript("vendor/xlsx-style.min.js").then(() => { const x = window.XLSX; window.XLSX = plain; return x; }); })();
 
 async function pdfLines(buffer){
   const lib = await pdfLib(), doc = await lib.getDocument({ data: new Uint8Array(buffer) }).promise, lines = [];
@@ -200,6 +204,7 @@ function run(){
     const main = a.files.find(f => f.status === "used");
     lastName = outputName(main.name);
     lastCheck = a.result.check && a.result.data.dose ? { check: a.result.check, name: checkName(main.name) } : null;
+    if (lastCheck) styledXLSX().catch(() => {});
     $("dl-check").classList.toggle("hidden", !lastCheck);
     show(a.result.data, a.result.info, a.files.filter(f => f.status === "used").map(f => f.name).join(" + "));
   }catch(err){
@@ -234,7 +239,11 @@ fileInput.onchange = e => { if(e.target.files.length) handleFiles([...e.target.f
 drop.addEventListener("drop", e=>{ if(e.dataTransfer.files.length) handleFiles([...e.dataTransfer.files]); });
 
 const downloadPdf = () => { if (lastData) window.TMRPdf.download(lastData, lastInfo, lastName); };
-const downloadCheck = () => { if (lastCheck) XLSX.writeFile(doseCheckWorkbook(lastCheck.check, XLSX).wb, lastCheck.name + ".xlsx"); };
+const downloadCheck = async () => {
+  if (!lastCheck) return;
+  const X = await styledXLSX().catch(() => XLSX);
+  X.writeFile(doseCheckWorkbook(lastCheck.check, X).wb, lastCheck.name + ".xlsx", { compression: true });
+};
 const downloadExtras = () => { downloadPdf(); downloadCheck(); };
 
 $("dl-xlsx").onclick = ()=>{

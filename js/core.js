@@ -137,9 +137,11 @@ function fromLoadReport(grid){
   const monthStart = last.slice(0,8) + "01", start = first < monthStart ? monthStart : first;
   const made = code => batches.filter(b => b.recipe === code && sum(b.ing, "act") > 0);
   const notes = [], missing = {}, fallbackIds = new Set();
-  // Each recipe's shares come only from its batches made in the counted month (pooled by weight).
+  // Each recipe's shares come only from its batches made in the counted month (pooled by weight). Every row counts,
+  // cancelled batches too, so the totals equal a plain filter-and-sum of the Load report.
   const pooled = code => {
-    const all = made(code); let use = all.filter(b => b.time.slice(0,10) >= start);
+    const all = made(code); let use = batches.filter(b => b.recipe === code && b.time.slice(0,10) >= start);
+    if (use.reduce((a, b) => a + sum(b.ing, "act"), 0) <= 0) use = [];
     if (!use.length && all.length){
       use = [all[all.length-1]]; fallbackIds.add(use[0].id);
       notes.push(`No ${names[code] || code} batch was made in this period, so the last one before it (${usDate(use[0].time.slice(0,10))}) was used.`);
@@ -590,78 +592,97 @@ function doseCheckWorkbook(check, XLSX){
   const match = (r, i, s) => s === "<>" ? S(r[i]) !== "" : S(r[i]).toLowerCase() === String(s).toLowerCase();
   const sumIf = (vi, conds) => rows.filter(r => conds.every(([i, s]) => match(r, i, s))).reduce((a, r) => a + num(r[vi]), 0);
   const sumifsF = (c, conds) => `SUMIFS(${col(c)},` + conds.map(([cc, s]) => `${col(cc)},${s === "<>" ? '"<>"' : crit(s)}`).join(",") + ")";
-  const cell = (f, v, z) => Object.assign({ t:"n", f, v }, z ? { z } : {});
+  // Styles (cell.s) are written by xlsx-js-style; plain SheetJS ignores them. Colours = groups of Load report rows.
+  const C = { head:"0B3D91", batch:"DDEBF7", fed:"FFF2CC", dose:"E2EFDA" };
+  const thin = { style:"thin", color:{ rgb:"BFBFBF" } }, box = { top:thin, bottom:thin, left:thin, right:thin };
+  const st = (o = {}) => Object.assign(
+    { font:{ name:"Calibri", sz:o.sz || 11, bold:!!o.bold, color:{ rgb:o.color || "000000" } } },
+    o.fill ? { fill:{ patternType:"solid", fgColor:{ rgb:o.fill } } } : {}, o.border ? { border:box } : {}, o.fmt ? { numFmt:o.fmt } : {});
+  const txt = (v, o) => ({ t:"s", v, s:st(Object.assign({ border:true }, o)) });
+  const cell = (f, v, z, o) => ({ t:"n", f, v, z, s:st(Object.assign({ fmt:z, border:true }, o)) });
+  const hdr = cols => cols.map(v => txt(v, { bold:true, color:"FFFFFF", fill:C.head }));
+  const blank = o => ({ t:"z", s:st(Object.assign({ border:true }, o)) });
 
   // Dose check sheet, built top-down so the Load report formulas can point at its % cells.
-  const aoa = [[`Bovaer dose check: ${check.farm || ""}${check.dateRange ? " · " + check.dateRange.replace(/^From /, "").replace(" until ", " to ") : ""}`],
-    ["Every number is a formula on the Load report sheet (the period's rows exactly as exported). Click a number to see its formula, or press Ctrl+` to show them all."], []];
-  const q = s => `"${s}"`, WHERE = "Where it comes from (Load report sheet)", PDF = "On the dose report PDF";
-  const bovRow = {}, nestRow = {}, pct = {};
-  aoa.push(["", "Bovaer, lb", "Batch total, lb", "Bovaer %", PDF, WHERE]);
+  const period = check.dateRange ? check.dateRange.replace(/^From /, "").replace(" until ", " – ") : "";
+  const aoa = [[{ t:"s", v:`Bovaer dose check · ${check.farm || ""} · ${period}`, s:st({ bold:true, sz:14 }) }], [],
+    [txt("Batches", { fill:C.batch }), txt("Ration loads", { fill:C.fed }), txt("Dose", { fill:C.dose })], []];
+  const q = s => `"${s}"`, bovRow = {}, nestRow = {}, pct = {};
+  const PDF = "Dose report PDF", FILTER = "Load report filter";
+  const B = { fill:C.batch }, F = { fill:C.fed }, G = { fill:C.dose };
+  aoa.push(hdr(["Bovaer premix batches", "Bovaer, lb", "Batch total, lb", "Bovaer %", PDF, FILTER]));
   check.bovars.forEach(bv => {
     const n = aoa.length + 1, a = check.bovaerIngs.reduce((s, i) => s + sumIf(iAct, [[iRec, bv.recipe], [iIng, i]]), 0), b = sumIf(iAct, [[iRec, bv.recipe], [iIng, "<>"]]);
     bovRow[bv.code] = n; pct[bv.code] = b ? a / b : 0;
-    aoa.push([`Bovaer in ${bv.name} batches`, cell(check.bovaerIngs.map(i => sumifsF(ACT, [[REC, bv.recipe], [ING, i]])).join("+"), a, "#,##0"),
-      cell(sumifsF(ACT, [[REC, bv.recipe], [ING, "<>"]]), b, "#,##0"), cell(`IF(C${n}=0,0,B${n}/C${n})`, pct[bv.code], "0.0000%"),
-      "Inclusion % (Bovaer in blend)",
-      `Recipe ${q(bv.recipe)}: B = Ingredient ${check.bovaerIngs.map(q).join(" + ")}, C = all ingredients; sum of Actual weight (column ${ACT}). D = B ÷ C`]);
+    aoa.push([txt(bv.name, B), cell(check.bovaerIngs.map(i => sumifsF(ACT, [[REC, bv.recipe], [ING, i]])).join("+"), a, "#,##0", B),
+      cell(sumifsF(ACT, [[REC, bv.recipe], [ING, "<>"]]), b, "#,##0", B), cell(`IF(C${n}=0,0,B${n}/C${n})`, pct[bv.code], "0.0000%", Object.assign({ bold:true }, B)),
+      txt("Inclusion %"), txt(`Recipe = ${q(bv.recipe)} · B: Ingredient = ${check.bovaerIngs.map(q).join(" + ")} · C: all · Σ Actual weight`)]);
   });
-  aoa.push([]); aoa.push(["", "Bovaer premix, lb", "Batch total, lb", "Bovaer premix %", PDF, WHERE]);
+  aoa.push([]); aoa.push(hdr(["Premix batches", "Bovaer premix, lb", "Batch total, lb", "Bovaer premix %", PDF, FILTER]));
   check.carriers.forEach(c => c.bovars.filter(bv => bv in bovRow).forEach(bv => {
     const n = aoa.length + 1, bvIng = (check.bovars.find(x => x.code === bv) || {}).ing;
     const a = sumIf(iAct, [[iRec, c.recipe], [iIng, bvIng]]), b = sumIf(iAct, [[iRec, c.recipe], [iIng, "<>"]]);
     (nestRow[c.code] = nestRow[c.code] || {})[bv] = n; pct[c.code + "|" + bv] = b ? a / b : 0;
-    aoa.push([`${(check.bovars.find(x => x.code === bv) || {}).name} in ${c.name} batches`, cell(sumifsF(ACT, [[REC, c.recipe], [ING, bvIng]]), a, "#,##0"),
-      cell(sumifsF(ACT, [[REC, c.recipe], [ING, "<>"]]), b, "#,##0"), cell(`IF(C${n}=0,0,B${n}/C${n})`, pct[c.code + "|" + bv], "0.0000%"),
-      `${c.name}: Nested % in Premix`,
-      `Recipe ${q(c.recipe)}: B = Ingredient ${q(bvIng)}, C = all ingredients; sum of Actual weight (column ${ACT}). D = B ÷ C`]);
+    aoa.push([txt(c.name, B), cell(sumifsF(ACT, [[REC, c.recipe], [ING, bvIng]]), a, "#,##0", B),
+      cell(sumifsF(ACT, [[REC, c.recipe], [ING, "<>"]]), b, "#,##0", B), cell(`IF(C${n}=0,0,B${n}/C${n})`, pct[c.code + "|" + bv], "0.0000%", Object.assign({ bold:true }, B)),
+      txt(`Nested % · ${c.name}`), txt(`Recipe = ${q(c.recipe)} · B: Ingredient = ${q(bvIng)} · C: all · Σ Actual weight`)]);
   }));
 
   // Load report sheet: Bovaer fed on the premix (or Bovaer premix) rows of milking-cow rations, and their DM.
   const lact = new Set(check.lactating.map(s => s.toLowerCase()));
+  const batchRecipes = new Set([...check.bovars, ...check.carriers].map(x => x.recipe.toLowerCase()));
   const viaIng = {};
   check.carriers.forEach(c => { const parts = Object.keys(nestRow[c.code] || {});
     if (parts.length) viaIng[c.ing.toLowerCase()] = { code:c.code, f: parts.map(bv => `${D}$D$${nestRow[c.code][bv]}*${D}$D$${bovRow[bv]}`).join("+"),
       v: parts.reduce((s, bv) => s + pct[c.code + "|" + bv] * pct[bv], 0) }; });
   check.bovars.forEach(bv => { viaIng[bv.ing.toLowerCase()] = { code:bv.code, f:`${D}$D$${bovRow[bv.code]}`, v:pct[bv.code] }; });
-  const lr = [head.concat(["Bovaer fed (lb) = Actual weight x Bovaer premix % x Bovaer %", "Milking-cow DM (lb)"])], fed = {}, qty = {};
+  const lr = [hdr(head.concat(["Bovaer fed (lb)", "Milking-cow DM (lb)"]))], fed = {}, qty = {};
+  const plain = { t:"z" }, sBatch = st({ fill:C.batch }), sFed = st({ fill:C.fed });
   let bovaerTot = 0, dmTot = 0;
   rows.forEach((r, k) => {
-    // Blank cells stay empty (null): Excel's "<>" criterion counts an empty-text cell as filled
-    const n = k + 2, out = head.map((h, i) => S(r[i]) === "" ? null : NUM.includes(i) ? num(r[i]) : S(r[i]));
-    if (lact.has(S(r[iRec]).toLowerCase()) && S(r[iIng])){
-      const via = viaIng[S(r[iIng]).toLowerCase()];
-      out[head.length] = via ? cell(`${ACT}${n}*(${via.f})`, num(r[iAct]) * via.v, "#,##0.00") : null;
-      out[head.length + 1] = cell(`${DRY}${n}`, num(r[iDry]), "#,##0");
-      if (via){ bovaerTot += num(r[iAct]) * via.v; fed[via.code] = (fed[via.code] || 0) + num(r[iAct]) * via.v; qty[via.code] = (qty[via.code] || 0) + num(r[iAct]); }
+    const n = k + 2, recipe = S(r[iRec]).toLowerCase(), hasIng = !!S(r[iIng]);
+    const via = lact.has(recipe) && hasIng ? viaIng[S(r[iIng]).toLowerCase()] : null;
+    const s = via ? sFed : batchRecipes.has(recipe) && hasIng ? sBatch : null;
+    // Blank Ingredient cells stay value-less: Excel's "<>" criterion counts an empty-text cell as filled
+    const out = head.map((h, i) => S(r[i]) === "" ? (s && i !== iIng ? { t:"s", v:"", s } : plain)
+      : Object.assign(NUM.includes(i) ? { t:"n", v:num(r[i]) } : { t:"s", v:S(r[i]) }, s ? { s } : {}));
+    out.push(plain, plain);
+    if (lact.has(recipe) && hasIng){
+      if (via){
+        out[head.length] = { t:"n", f:`${ACT}${n}*(${via.f})`, v:num(r[iAct]) * via.v, z:"#,##0.00", s:st({ fill:C.fed, bold:true, fmt:"#,##0.00" }) };
+        bovaerTot += num(r[iAct]) * via.v; fed[via.code] = (fed[via.code] || 0) + num(r[iAct]) * via.v; qty[via.code] = (qty[via.code] || 0) + num(r[iAct]);
+      }
+      out[head.length + 1] = { t:"n", f:`${DRY}${n}`, v:num(r[iDry]), z:"#,##0", s:st({ fill:C.dose, fmt:"#,##0" }) };
       dmTot += num(r[iDry]);
     }
     lr.push(out);
   });
 
-  aoa.push([]); aoa.push(["Source (as in the dose report PDF)", "Quantity fed, lb", "Bovaer fed, lb", "", PDF, WHERE]);
-  [...check.carriers, ...check.bovars].filter(c => c.code in qty).forEach(c =>
-    aoa.push([c.name, cell(`SUMIFS(${col(ACT)},${col(ING)},${crit(c.ing)},${col(Q)},"<>")`, qty[c.code], "#,##0"),
-      cell(`SUMIFS(${col(Q)},${col(ING)},${crit(c.ing)})`, fed[c.code], "#,##0.0"), "",
-      `${c.name}: Quantity Fed (As-Fed)`,
-      `Ingredient ${q(c.ing)} in the milking-cow rations: B = sum of Actual weight (column ${ACT}), C = sum of Bovaer fed (column ${Q})`]));
-  const totRow = aoa.length + 1;
-  aoa.push(["Total Bovaer fed, lb", "", cell(`SUM(${col(Q)})`, bovaerTot, "#,##0.0"), "",
-    "Total 3-NOP (A) = this × 10% × 453,592 mg/lb",
-    `Sum of column ${Q}. Each premix row: Actual weight × Bovaer premix % × Bovaer % (from the rows above)`]);
+  const NOP_MG = NOP_IN_BOVAER * MG_PER_LB;
+  aoa.push([]); aoa.push(hdr(["Fed to milking cows", "Quantity fed, lb", "Bovaer fed, lb", "3-NOP, mg", PDF, FILTER]));
+  [...check.carriers, ...check.bovars].filter(c => c.code in qty).forEach(c => {
+    const n = aoa.length + 1;
+    aoa.push([txt(c.name, F), cell(`SUMIFS(${col(ACT)},${col(ING)},${crit(c.ing)},${col(Q)},"<>")`, qty[c.code], "#,##0", F),
+      cell(`SUMIFS(${col(Q)},${col(ING)},${crit(c.ing)})`, fed[c.code], "#,##0.0", F), cell(`C${n}*${NOP_MG}`, fed[c.code] * NOP_MG, "#,##0", F),
+      txt(`Quantity Fed · 3-NOP · ${c.name}`), txt(`Ingredient = ${q(c.ing)} in milking-cow rations · B: Σ Actual weight · C: Σ Bovaer fed`)]);
+  });
+  aoa.push([]); aoa.push(hdr(["Dose", "", "", "", PDF, FILTER]));
+  const totRow = aoa.length + 1, dmRow = totRow + 1, kgRow = totRow + 2;
+  aoa.push([txt("Total Bovaer fed / 3-NOP", G), blank(G), cell(`SUM(${col(Q)})`, bovaerTot, "#,##0.0", G), cell(`C${totRow}*${NOP_MG}`, bovaerTot * NOP_MG, "#,##0", Object.assign({ bold:true }, G)),
+    txt("Total 3-NOP (A)"), txt(`Σ Bovaer fed (column ${Q})`)]);
+  aoa.push([txt("Total feed delivered (DM), lb", G), cell(`SUM(${col(R)})`, dmTot, "#,##0", G), blank(G), blank(G),
+    txt("Total Feed Delivered (B)"), txt(`Σ Milking-cow DM (column ${R})`)]);
+  aoa.push([txt("Total feed delivered (DM), kg", G), cell(`B${dmRow}*${KG_PER_LB}`, dmTot * KG_PER_LB, "#,##0.00", Object.assign({ bold:true }, G)), blank(G), blank(G),
+    txt("Converted to kg DM"), txt("")]);
+  aoa.push([txt("Dose, mg 3-NOP / kg DM", Object.assign({ bold:true, sz:12 }, G)),
+    cell(`IF(B${kgRow}=0,0,D${totRow}/B${kgRow})`, dmTot ? bovaerTot * NOP_IN_BOVAER / dmTot * 1e6 : 0, "0.00", Object.assign({ bold:true, sz:12 }, G)), blank(G), blank(G),
+    txt("Final Dose (A / B)"), txt("")]);
   aoa.push([]);
-  const dmRow = aoa.length + 1;
-  aoa.push(["Total feed delivered (dry matter), lb", cell(`SUM(${col(R)})`, dmTot, "#,##0"), "", "",
-    "Total Feed Delivered (Dry Matter)", `Sum of column ${R} = Dry weight (column ${DRY}) of every milking-cow ration row`]);
-  aoa.push(["Dose, mg 3-NOP / kg DM", cell(`IF(B${dmRow}=0,0,C${totRow}*${NOP_IN_BOVAER}/B${dmRow}*1000000)`, dmTot ? bovaerTot * NOP_IN_BOVAER / dmTot * 1e6 : 0, "0.00"), "", "",
-    "Calculated Final Dose", `Total Bovaer fed (C${totRow}) × 10% 3-NOP ÷ total dry matter (B${dmRow}) × 1,000,000`]);
-  aoa.push([]);
-  aoa.push([`Milking-cow rations: ${check.lactating.map(nameOf).join(", ")}`]);
-  aoa.push([`Load report column ${Q} (Bovaer fed) = Actual weight x Bovaer premix % x Bovaer %, on the premix rows of milking-cow rations. Column ${R} = their Dry weight.`]);
-  aoa.push(["The Bovaer in the Bovaer premix batches is what was mixed this period, not what was fed: Bovaer premix stays in the bin between batches."]);
+  aoa.push([txt("Milking-cow rations", { bold:true }), { t:"s", v:check.lactating.map(nameOf).join(", "), s:st() }]);
 
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(aoa); ws["!cols"] = [{ wch:44 }, { wch:18 }, { wch:18 }, { wch:16 }, { wch:38 }, { wch:120 }];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{ wch:34 }, { wch:18 }, { wch:18 }, { wch:18 }, { wch:40 }, { wch:96 }];
   const wl = XLSX.utils.aoa_to_sheet(lr); wl["!cols"] = head.map(h => ({ wch: ["Recipe","Ingredient"].includes(h) ? 32 : h === "BatchId" ? 14 : 18 })).concat([{ wch:16 }, { wch:19 }]);
   wl["!autofilter"] = { ref: `A1:${R}${lr.length}` };
   XLSX.utils.book_append_sheet(wb, ws, "Dose check");
