@@ -44,7 +44,8 @@ function show(data, info, fileName){
       + `÷ ${fmt(data.herdDM*2000,0)} lb dry matter = ${fmt(d.mgPerKg,1)} mg/kg.</p>` : "")
     + (d && d.intended ? `<p><b>Recipe (intended) dose:</b> the same feeding with each batch's recipe call instead of what was loaded: `
       + `${fmt(d.intended.bovaerAsFed*2000,1)} lb Bovaer = ${fmt(d.intended.mgPerKg,1)} mg/kg.</p>` : "")
-    + (info.crossCheck ? `<p><b>Cross-check:</b> ${esc(info.crossCheck.label)} ${fmt(info.crossCheck.mgPerKg,1)} mg/kg.</p>` : "");
+    + (info.crossCheck ? `<p><b>Cross-check:</b> ${esc(info.crossCheck.label)} ${fmt(info.crossCheck.mgPerKg,1)} mg/kg.</p>` : "")
+    + (data.calculator ? calcTable(data.calculator) : "");
 
   const rd = $("r-dose"), rds = $("r-dose-sub");
   $("r-dose-label").textContent = d && d.basis === "intended" ? "Bovaer dose (recipe, intended)" : "Bovaer dose";
@@ -124,6 +125,23 @@ function show(data, info, fileName){
   lastRows = uploadRows(data);
   lastData = data; lastInfo = info;
   $("dl-pdf").classList.toggle("hidden", !data.calculator);
+}
+
+// Same inputs and totals as the dose report PDF.
+function calcTable(c){
+  const th = (t, r) => `<th class="${r ? "text-right" : "text-left"} font-medium pb-1 pr-3">${t}</th>`;
+  const td = (v, r, b) => `<td class="py-1.5 pr-3 ${r ? "text-right tnum" : ""} ${b ? "font-semibold" : ""}">${v}</td>`;
+  const pct = v => v == null ? "—" : fmt(v, 4) + "%";
+  const rows = c.sources.map(s => `<tr class="border-t border-border/70">${td(esc(s.name))}${td(fmt(s.quantityLb,0), 1)}${td(pct(s.nestedPct), 1)}`
+    + `${td(pct(s.inclusionPct), 1)}${td(fmt(s.bovaerLb,1), 1)}${td(fmt(s.nopMg,0), 1)}</tr>`).join("");
+  const tot = (label, v, b) => `<tr class="border-t border-border/70"><td colspan="3" class="py-1.5 pr-3 ${b ? "font-semibold" : ""}">${label}</td><td colspan="2"></td>${td(v, 1, b)}</tr>`;
+  return `<div class="overflow-x-auto pt-2"><table class="w-full text-sm"><thead><tr class="text-muted-foreground text-xs uppercase tracking-wide">
+      ${th("Dose report input")}${th("Quantity fed, lb as fed", 1)}${th("Bovaer premix % (nested)", 1)}${th("Bovaer % (inclusion)", 1)}${th("Bovaer fed, lb", 1)}${th("3-NOP, mg", 1)}
+    </tr></thead><tbody>${rows}
+    ${tot("Total 3-NOP (A), mg", fmt(c.totalNopMg,0))}
+    ${tot("Total feed delivered (DM), lb", fmt(c.totalFeedLbDM,0))}
+    ${tot("Total feed delivered (B), kg DM", fmt(c.totalFeedKgDM,2))}
+    ${tot("Final dose (A / B), mg/kg DM", fmt(c.mgPerKg,2), 1)}</tbody></table></div>`;
 }
 
 function renderTable(id, rows, total){
